@@ -127,13 +127,22 @@ async def prompt_custom_persona_name(update: Update, context: ContextTypes.DEFAU
     """Asks the user for the name of their new persona."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("What is the name of your new custom persona?")
+    # --- FIX: Added a "Back" button to this menu ---
+    buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
+    markup = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text("What is the name of your new custom persona?", reply_markup=markup)
     return config.CUSTOM_PERSONA_NAME
 
 async def prompt_custom_persona_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Asks the user for the system prompt of their new persona."""
     context.user_data['new_persona_name'] = update.message.text.strip()
-    await update.message.reply_text("Great. Now, please provide the full system prompt for this persona.")
+    # --- FIX: Added a "Back" button to this menu ---
+    buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
+    markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(
+        "Great. Now, please provide the full system prompt for this persona.",
+        reply_markup=markup
+    )
     return config.CUSTOM_PERSONA_PROMPT
 
 async def save_custom_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

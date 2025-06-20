@@ -77,11 +77,13 @@ def get_entry_points():
 
 def get_fallbacks():
     """Returns the fallbacks for the conversation."""
-    # --- FIX: Import setup_hub_command locally to be used in the fallback ---
     from .hub import setup_hub_command
+    # --- FIX: Import persona_menu to be used in the fallback ---
+    from .persona import persona_menu
     return [
-        # --- FIX: Add a callback query handler for the main "back" button ---
         CallbackQueryHandler(setup_hub_command, pattern="^hub_back$"),
+        # --- FIX: Add a callback query handler for the "back to persona" button ---
+        CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
         CommandHandler("cancel", cancel_command)
     ]
 
