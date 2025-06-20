@@ -130,6 +130,22 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await placeholder.edit_text("❌ An unexpected error occurred while processing your request. Please try again later.")
 
 
+        final_response_text = sanitized_response
+        # --- FIX: Use the correct constant for the length check ---
+        if len(final_response_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
+            final_response_text = final_response_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("...")] + "..."
+        await placeholder.edit_text(final_response_text, parse_mode=ParseMode.HTML)
+        
+        await db_service.add_message_to_db(user.id, "user", user_text)
+        await db_service.add_message_to_db(user.id, "assistant", full_response)
+
+    except ConnectionError:
+        await placeholder.edit_text("❌ Failed to connect to the AI service. It might be offline or misconfigured.")
+        logger.error(f"AI connection error in chat_handler for user {user.id}.")
+    except Exception as e:
+        logger.error(f"Error in chat_handler for user {user.id}: {e}", exc_info=True)
+        await placeholder.edit_text("❌ An unexpected error occurred while processing your request. Please try again later.")
+
 def register(application: Application):
     """Registers the main chat handler. Should be added last."""
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
