@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
 
 def _build_sfw_persona_prompt() -> str:
-    """Builds the prompt for the AI to generate a persona in JSON format."""
+    """Builds the prompt for the AI to generate a persona using a simple delimiter."""
     return (
         "Generate a simple, safe-for-work fantasy character persona. "
-        "Your response MUST be a single, valid JSON object. Do not include any text before or after the JSON object. "
-        "The JSON object must have exactly two keys: "
-        '1. "name": A string for the character\'s name. '
-        '2. "prompt": A string for the character\'s detailed system prompt.'
+        "Your response MUST follow this format exactly:\n"
+        "Line 1: The character's name.\n"
+        "Line 2: The exact delimiter string '###-###-###'.\n"
+        "Line 3 onwards: The full, multi-paragraph system prompt for the persona."
     )
 
 # --- Menu and Action Functions ---
@@ -65,7 +65,7 @@ async def persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return config.PERSONA_MENU
 
 async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Generates a new SFW persona by parsing a JSON response from the AI."""
+    """Generates a new SFW persona by parsing a delimiter-based response from the AI."""
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("Generating a SFW persona...")
@@ -75,19 +75,22 @@ async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         generated_str = await ai_service.get_generation(prompt, task_type="utility")
         
+        # --- MODIFICATION START: Replace JSON parsing with simple, robust delimiter parsing ---
         try:
-            cleaned_str = re.sub(r'```json\s*|\s*```', '', generated_str, flags=re.DOTALL).strip()
-            # --- FIX: Added strict=False to allow for newlines in the prompt string ---
-            persona_data = json.loads(cleaned_str, strict=False)
-            name_part = persona_data.get("name", "Unnamed Persona")
-            prompt_part = persona_data.get("prompt", "No prompt provided by AI.")
-            
-            if not isinstance(name_part, str) or not isinstance(prompt_part, str):
-                raise ValueError("JSON keys 'name' and 'prompt' must be strings.")
+            parts = generated_str.split('###-###-###', 1)
+            if len(parts) != 2:
+                raise ValueError("Delimiter '###-###-###' not found in AI output.")
 
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to parse JSON from AI response. Error: {e}. Full output: {generated_str}")
-            raise ValueError(f"Could not parse AI output. The model did not return valid JSON. Response: {generated_str[:200]}...")
+            name_part = parts[0].strip()
+            prompt_part = parts[1].strip()
+
+            if not name_part or not prompt_part:
+                raise ValueError("Parsed name or prompt is empty.")
+
+        except (ValueError, IndexError) as e:
+            logger.error(f"Failed to parse delimiter format from AI response. Error: {e}. Full output: {generated_str}")
+            raise ValueError(f"Could not parse AI output. The model did not use the correct delimiter format.")
+        # --- MODIFICATION END ---
 
         context.chat_data['generated_persona'] = {"name": name_part, "prompt": prompt_part, "category": "sfw"}
         

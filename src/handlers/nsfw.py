@@ -39,7 +39,7 @@ NSFW_RATELIMIT_LOCK = asyncio.Lock() # Add a lock for thread-safe access to NSFW
 
 # --- Helper Functions ---
 def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Builds the prompt for the AI to generate an NSFW persona in JSON format."""
+    """Builds the prompt for the AI to generate an NSFW persona using a simple delimiter."""
     species = context.chat_data.get('nsfw_gen_species', 'any')
     gender = context.chat_data.get('nsfw_gen_gender', 'any')
     role = context.chat_data.get('nsfw_gen_role', 'any')
@@ -55,11 +55,11 @@ def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
     
     prompt_parts.extend([
         "The persona prompt must be very detailed, describing their personality, background, appearance, and how they should interact with the user in an erotic or dominant/submissive manner.",
-        # --- MODIFICATION START ---
-        "Your response MUST be a single, valid JSON object. Do not include any text before or after the JSON object. "
-        "The JSON object must have exactly two keys: "
-        '1. "name": A string for the character\'s name. '
-        '2. "prompt": A string for the character\'s detailed system prompt.'
+        # --- MODIFICATION START: New simpler format instruction ---
+        "Your response MUST follow this format exactly:",
+        "Line 1: The character's name.",
+        "Line 2: The exact delimiter string '###-###-###'.",
+        "Line 3 onwards: The full, multi-paragraph system prompt for the persona."
         # --- MODIFICATION END ---
     ])
     return "\n".join(prompt_parts)
@@ -168,7 +168,7 @@ async def handle_fetish_selection(update: Update, context: ContextTypes.DEFAULT_
     return config.NSFW_GEN_FETISHES
 
 async def generate_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Generates and confirms an NSFW persona using JSON parsing."""
+    """Generates and confirms an NSFW persona using delimiter parsing."""
     logger.debug("Entering generate_and_confirm function.")
     
     query = update.callback_query
@@ -182,19 +182,22 @@ async def generate_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         generated_str = await ai_service.get_generation(prompt, task_type="creative")
         
+        # --- MODIFICATION START: Replace JSON parsing with simple, robust delimiter parsing ---
         try:
-            cleaned_str = re.sub(r'```json\s*|\s*```', '', generated_str, flags=re.DOTALL).strip()
-            # --- FIX: Added strict=False to allow for newlines in the prompt string ---
-            persona_data = json.loads(cleaned_str, strict=False)
-            name = persona_data.get("name", "Unnamed NSFW Persona")
-            prompt_text = persona_data.get("prompt", "No prompt provided by AI.")
+            parts = generated_str.split('###-###-###', 1)
+            if len(parts) != 2:
+                raise ValueError("Delimiter '###-###-###' not found in AI output.")
             
-            if not isinstance(name, str) or not isinstance(prompt_text, str):
-                raise ValueError("JSON keys 'name' and 'prompt' must be strings.")
+            name = parts[0].strip()
+            prompt_text = parts[1].strip()
 
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.error(f"Failed to parse JSON from AI response. Error: {e}. Full output: {generated_str}")
-            raise ValueError(f"Could not parse AI output. The model did not return valid JSON. Response: {generated_str[:200]}...")
+            if not name or not prompt_text:
+                 raise ValueError("Parsed name or prompt is empty.")
+
+        except (ValueError, IndexError) as e:
+            logger.error(f"Failed to parse delimiter format from AI response. Error: {e}. Full output: {generated_str}")
+            raise ValueError(f"Could not parse AI output. The model did not use the correct delimiter format.")
+        # --- MODIFICATION END ---
 
         context.chat_data['generated_persona'] = {"name": name, "prompt": prompt_text, "category": "nsfw"}
         
