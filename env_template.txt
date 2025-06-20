@@ -1,0 +1,22 @@
+# .env
+
+# --- Core Bot Credentials (Required) ---
+TELEGRAM_BOT_TOKEN=
+BOT_OWNER_ID=
+TELEGRAM_BOT_USERNAME=
+
+# --- AI Model Server Configuration (Required) ---
+LM_STUDIO_API_BASE=
+
+# --- AI Model Naming (Optional) ---
+# Leave blank to auto-detect from LM Studio.
+LM_STUDIO_CHAT_MODEL=
+LM_STUDIO_CREATIVE_MODEL=
+
+# --- Feature Toggles ---
+# Set to "1" to enable, "0" to disable.
+VECTOR_MEMORY_ENABLED=1
+DEBUG_LOGGING=0
+
+#Disable ChromaDB analytics and telemetry.
+CHROMA_SERVER_NO_ANALYTICS=1
