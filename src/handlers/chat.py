@@ -48,18 +48,15 @@ def sanitize_html(text):
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The entry point for all user text messages for AI chat."""
-    # --- FIX: Define the correct maximum message length as a constant ---
     TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
     user = update.effective_user
     user_text = update.message.text
     
-    # Pre-flight checks with database for rate limiting
     last_message_time = await db_service.get_user_timestamp(user.id)
     if time.time() - last_message_time < config.USER_RATE_LIMIT:
         await update.message.reply_text("⏱️ Please wait a moment before sending another message.")
         return
-    # Update the timestamp immediately after the check passes
     await db_service.update_user_timestamp(user.id, time.time())
 
     if 'user_display_name' not in context.user_data:
@@ -75,38 +72,52 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         messages.append({"role": "user", "content": user_text})
         
         full_response = ""
-        sanitized_response = ""
-        last_edit_time = time.time()
         
         if not context.bot_data.get('ai_service_online', True):
             await placeholder.edit_text("❌ The AI service is currently offline. Please try again later.")
             logger.warning(f"AI service reported offline, rejecting chat for user {user.id}.")
             return
+
+        # --- MODIFICATION START ---
+        # Check the streaming toggle from bot_data
+        streaming_enabled = context.bot_data.get('streaming_enabled', False)
+
+        if streaming_enabled:
+            # --- Streaming Path ---
+            sanitized_response = ""
+            last_edit_time = time.time()
+            response_generator = ai_service.get_chat_response(messages, stream=True)
             
-        response_generator = ai_service.get_chat_response(messages, stream=True)
+            async for chunk in response_generator:
+                full_response += chunk
+                sanitized_response += sanitize_html(chunk)
+
+                if time.time() - last_edit_time > config.STREAM_UPDATE_INTERVAL:
+                    try:
+                        display_text = sanitized_response + " ▋"
+                        if len(display_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
+                            display_text = display_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("... ▋")] + "... ▋"
+                        await placeholder.edit_text(display_text, parse_mode=ParseMode.HTML)
+                        last_edit_time = time.time()
+                    except BadRequest as e:
+                        logger.debug(f"BadRequest during message edit for user {user.id}: {e}")
+                    except Exception as e:
+                        logger.error(f"Error during message edit for user {user.id}: {e}", exc_info=True)
+            
+            final_response_text = sanitized_response
+        else:
+            # --- Non-Streaming Path ---
+            response_generator = ai_service.get_chat_response(messages, stream=False)
+            # A non-streamed response will only yield one chunk
+            async for chunk in response_generator:
+                full_response += chunk
+            
+            final_response_text = sanitize_html(full_response)
         
-        async for chunk in response_generator:
-            full_response += chunk
-            sanitized_response += sanitize_html(chunk)
-
-            if time.time() - last_edit_time > config.STREAM_UPDATE_INTERVAL:
-                try:
-                    display_text = sanitized_response + " ▋"
-                    # --- FIX: Use the correct constant for the length check ---
-                    if len(display_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
-                        display_text = display_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("... ▋")] + "... ▋"
-                    await placeholder.edit_text(display_text, parse_mode=ParseMode.HTML)
-                    last_edit_time = time.time()
-                except BadRequest as e:
-                    logger.debug(f"BadRequest during message edit for user {user.id}: {e}")
-                except Exception as e:
-                    logger.error(f"Error during message edit for user {user.id}: {e}", exc_info=True)
-
-        final_response_text = sanitized_response
-        # --- FIX: Use the correct constant for the length check ---
         if len(final_response_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
             final_response_text = final_response_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("...")] + "..."
         await placeholder.edit_text(final_response_text, parse_mode=ParseMode.HTML)
+        # --- MODIFICATION END ---
         
         await db_service.add_message_to_db(user.id, "user", user_text)
         await db_service.add_message_to_db(user.id, "assistant", full_response)
@@ -117,6 +128,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in chat_handler for user {user.id}: {e}", exc_info=True)
         await placeholder.edit_text("❌ An unexpected error occurred while processing your request. Please try again later.")
+
 
 def register(application: Application):
     """Registers the main chat handler. Should be added last."""
