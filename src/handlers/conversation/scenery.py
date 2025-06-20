@@ -1,0 +1,128 @@
+# src/handlers/conversation/scenery.py
+"""
+Handles all conversation flows related to selecting and generating Sceneries.
+"""
+import asyncio
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ConversationHandler, CallbackQueryHandler, ContextTypes
+from telegram.constants import ParseMode
+
+import src.config as config
+from src.services import database as db_service
+from src.services import ai_models as ai_service
+
+logger = logging.getLogger(__name__)
+
+def _build_scene_generation_prompt(genre: str) -> str:
+    """Builds the prompt for the AI to generate a scene."""
+    base = "Describe a unique and evocative environment for a role-play scene. Focus on the physical place, its atmosphere, sights, sounds, and smells. Do NOT include any people, characters, or ongoing events. The description should be a single, detailed paragraph."
+    requirement = f"The genre must be: **{genre}**."
+    return f"{base}\n\n**Requirement:**\n{requirement}"
+
+async def scenery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Displays the main scenery selection menu."""
+    query = update.callback_query
+    await query.answer()
+    all_sceneries = context.bot_data.get('sceneries', {})
+    nsfw_enabled = context.user_data.get('nsfw_enabled', False)
+    full_scenery_data = context.bot_data.get('sceneries_full_data', {})
+    buttons = []
+    for name in sorted(all_sceneries.keys()):
+        if not nsfw_enabled and full_scenery_data.get(name, {}).get("category", "").lower() == "nsfw":
+            continue
+        buttons.append([InlineKeyboardButton(name, callback_data=f"scenery_select_{name}")])
+    buttons.append([InlineKeyboardButton("✨ Generate New Scene", callback_data="scenery_generate_new")])
+    buttons.append([InlineKeyboardButton("« Back to Setup Hub", callback_data="setup_back")])
+    await query.edit_message_text(
+        "<b>🏞️ Select a Scene</b>",
+        reply_markup=InlineKeyboardMarkup(buttons),
+        parse_mode=ParseMode.HTML
+    )
+    return config.SCENERY_MENU
+
+async def receive_scenery_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Applies a chosen scenery and provides navigation back to the scenery menu."""
+    query = update.callback_query
+    await query.answer()
+    name = query.data.replace("scenery_select_", "")
+    scenery_desc = context.bot_data.get('sceneries', {}).get(name)
+    if scenery_desc:
+        context.chat_data['scenery_name'] = name
+        context.chat_data['scenery'] = scenery_desc
+        buttons = [
+            [InlineKeyboardButton("« Back to Scenery Menu", callback_data="scenery_menu_back")]
+        ]
+        markup = InlineKeyboardMarkup(buttons)
+        await query.edit_message_text(f"✅ Scene set: <b>{name}</b>", parse_mode=ParseMode.HTML, reply_markup=markup)
+        return config.SCENERY_MENU
+    else:
+        await query.edit_message_text("❌ Error: Scenery not found.")
+        return await scenery_menu(update, context)
+
+async def prompt_scene_genre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Asks for a genre for the AI-generated scene."""
+    query = update.callback_query
+    await query.answer()
+    buttons = [
+        [InlineKeyboardButton("Fantasy", callback_data="scene_gen_Fantasy"), InlineKeyboardButton("Sci-Fi", callback_data="scene_gen_Sci-Fi")],
+        [InlineKeyboardButton("Modern", callback_data="scene_gen_Modern"), InlineKeyboardButton("Horror", callback_data="scene_gen_Horror")],
+        [InlineKeyboardButton("« Back to Scenery Menu", callback_data="scenery_menu_back")]
+    ]
+    await query.edit_message_text("Choose a genre for the generated scene:", reply_markup=InlineKeyboardMarkup(buttons))
+    return config.SCENE_GENRE_SELECT
+
+async def generate_new_scene(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Generates a new scene based on genre and shows it for confirmation."""
+    query = update.callback_query
+    await query.answer()
+    genre = query.data.replace("scene_gen_", "")
+    await query.edit_message_text(f"⏳ Generating '{genre}' scene...")
+    prompt = _build_scene_generation_prompt(genre)
+    try:
+        generated_scene = await ai_service.get_generation(prompt, task_type="creative")
+        if not generated_scene: raise ValueError("AI returned an empty response.")
+        context.chat_data['generated_scene'] = generated_scene
+        text = f"<b>Generated Scene:</b>\n\n<i>{generated_scene}</i>"
+        buttons = [
+            [InlineKeyboardButton("✅ Use This Scene", callback_data="scenery_use_generated")],
+            [InlineKeyboardButton("« Back to Scenery Menu", callback_data="scenery_menu_back")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.error(f"Failed to generate scene: {e}")
+        await query.edit_message_text("Sorry, failed to generate a scene.")
+    return config.SCENERY_MENU
+
+async def use_generated_scene(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Applies a scene that was generated by the AI and provides navigation back to the scenery menu."""
+    query = update.callback_query
+    await query.answer()
+    generated_scene = context.chat_data.pop('generated_scene', None)
+    if not generated_scene:
+        await query.edit_message_text("❌ Error: No generated scene found.")
+        return await scenery_menu(update, context)
+    scene_name = f"AI Scene ({generated_scene[:15]}...)"
+    context.chat_data['scenery_name'] = scene_name
+    context.chat_data['scenery'] = generated_scene
+    buttons = [
+        [InlineKeyboardButton("« Back to Scenery Menu", callback_data="scenery_menu_back")]
+    ]
+    markup = InlineKeyboardMarkup(buttons)
+    await query.edit_message_text("✅ AI-generated scene has been set!", parse_mode=ParseMode.HTML, reply_markup=markup)
+    return config.SCENERY_MENU
+
+def get_states():
+    """Returns the state handlers for the scenery module."""
+    return {
+        config.SCENERY_MENU: [
+            CallbackQueryHandler(receive_scenery_choice, pattern="^scenery_select_"),
+            CallbackQueryHandler(prompt_scene_genre, pattern="^scenery_generate_new$"),
+            CallbackQueryHandler(use_generated_scene, pattern="^scenery_use_generated$"),
+            CallbackQueryHandler(scenery_menu, pattern="^scenery_menu_back$"),
+        ],
+        config.SCENE_GENRE_SELECT: [
+            CallbackQueryHandler(generate_new_scene, pattern="^scene_gen_"),
+            CallbackQueryHandler(scenery_menu, pattern="^scenery_menu_back$"),
+        ],
+    }

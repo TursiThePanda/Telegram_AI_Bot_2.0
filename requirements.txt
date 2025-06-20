@@ -1,0 +1,17 @@
+# requirements.txt
+
+# Telegram Bot Framework
+python-telegram-bot
+
+# Environment Variable Loading
+python-dotenv
+
+# AI & Vector Database
+openai
+httpx
+chromadb
+sentence-transformers
+
+# System & Performance Monitoring
+psutil
+gputil
