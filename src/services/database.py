@@ -9,6 +9,8 @@ import sqlite3
 import json
 import time
 import asyncio
+import os
+os.environ['CHROMA_SERVER_NO_ANALYTICS'] = "1"
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, Any # Added Any for the Queue type hint
 
