@@ -77,7 +77,8 @@ async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYP
         
         try:
             cleaned_str = re.sub(r'```json\s*|\s*```', '', generated_str, flags=re.DOTALL).strip()
-            persona_data = json.loads(cleaned_str)
+            # --- FIX: Added strict=False to allow for newlines in the prompt string ---
+            persona_data = json.loads(cleaned_str, strict=False)
             name_part = persona_data.get("name", "Unnamed Persona")
             prompt_part = persona_data.get("prompt", "No prompt provided by AI.")
             
