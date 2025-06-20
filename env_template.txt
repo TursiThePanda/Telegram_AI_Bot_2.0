@@ -2,14 +2,16 @@
 
 # --- Core Bot Credentials (Required) ---
 TELEGRAM_BOT_TOKEN=
-BOT_OWNER_ID=
+BOT_OWNER_ID=202008273
 TELEGRAM_BOT_USERNAME=
 
 # --- AI Model Server Configuration (Required) ---
 LM_STUDIO_API_BASE=
 
-# --- AI Model Naming (Optional) ---
-# Leave blank to auto-detect from LM Studio.
+# --- AI Model Specification ---
+# You can use the same model for each one.
+# You can also use a different model for each one. 
+# They just need to be loaded at the same tim in the LM Studio
 LM_STUDIO_CHAT_MODEL=
 LM_STUDIO_CREATIVE_MODEL=
 

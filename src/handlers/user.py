@@ -30,8 +30,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(help_text)
 
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # testing runtime error function
-    raise RuntimeError("This is a test error!")
     """Displays information about the bot."""
     await update.message.reply_html(
         "<b>🤖 About This Bot</b>\n\n"

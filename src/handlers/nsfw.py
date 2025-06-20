@@ -38,7 +38,7 @@ NSFW_RATELIMIT_LOCK = asyncio.Lock() # Add a lock for thread-safe access to NSFW
 
 # --- Helper Functions ---
 def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Builds the prompt for the AI to generate an NSFW persona."""
+    """Builds the prompt for the AI to generate an NSFW persona in JSON format."""
     species = context.chat_data.get('nsfw_gen_species', 'any')
     gender = context.chat_data.get('nsfw_gen_gender', 'any')
     role = context.chat_data.get('nsfw_gen_role', 'any')
@@ -54,7 +54,12 @@ def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
     
     prompt_parts.extend([
         "The persona prompt must be very detailed, describing their personality, background, appearance, and how they should interact with the user in an erotic or dominant/submissive manner.",
-        "Your response MUST follow this format exactly: NAME: [Name] ### PROMPT: [Prompt]",
+        # --- MODIFICATION START ---
+        "Your response MUST be a single, valid JSON object. Do not include any text before or after the JSON object. "
+        "The JSON object must have exactly two keys: "
+        '1. "name": A string for the character\'s name. '
+        '2. "prompt": A string for the character\'s detailed system prompt.'
+        # --- MODIFICATION END ---
     ])
     return "\n".join(prompt_parts)
 
@@ -162,61 +167,51 @@ async def handle_fetish_selection(update: Update, context: ContextTypes.DEFAULT_
     return config.NSFW_GEN_FETISHES
 
 async def generate_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("DEBUG: generate_and_confirm function entered.") # For immediate console visibility
-    logger.debug("Entering generate_and_confirm function.") # For log file visibility
+    """Generates and confirms an NSFW persona using JSON parsing."""
+    logger.debug("Entering generate_and_confirm function.") #
     
-    query = update.callback_query
-    if query: 
-        await query.answer() # Answer the callback query first
+    query = update.callback_query #
+    if query: #
+        await query.answer() #
 
-    # Crucial: Use query.message for editing the message that contained the button.
-    message_to_edit = query.message # This is the Message object to edit
+    message_to_edit = query.message #
+    await message_to_edit.edit_text("⏳ Generating NSFW persona...") #
 
-    # First, edit the message to show "Generating..."
-    await message_to_edit.edit_text("⏳ Generating NSFW persona...")
-
-    prompt = _build_nsfw_prompt(context)
+    prompt = _build_nsfw_prompt(context) #
     try:
-        # Using 'creative' task type for NSFW generation as it implies more open-ended text.
-        generated_str = await ai_service.get_generation(prompt, task_type="creative")
+        generated_str = await ai_service.get_generation(prompt, task_type="creative") #
         
-        # Robust parsing using regex
-        name_match = re.search(r"NAME:\s*(.*?)(?:\s*###|$)", generated_str, re.IGNORECASE | re.DOTALL)
-        prompt_match = re.search(r"PROMPT:\s*(.*)", generated_str, re.IGNORECASE | re.DOTALL)
+        # --- MODIFICATION START ---
+        # Replace Regex parsing with robust JSON parsing
+        try:
+            # Clean the string in case the model wraps it in markdown ```json ... ```
+            cleaned_str = re.sub(r'```json\s*|\s*```', '', generated_str, flags=re.DOTALL).strip()
+            persona_data = json.loads(cleaned_str)
+            name = persona_data.get("name", "Unnamed NSFW Persona")
+            prompt_text = persona_data.get("prompt", "No prompt provided by AI.")
+            
+            if not isinstance(name, str) or not isinstance(prompt_text, str):
+                raise ValueError("JSON keys 'name' and 'prompt' must be strings.")
 
-        # Add debug logs to see what was matched
-        logger.debug(f"AI Generated String: {generated_str}")
-        logger.debug(f"Name Match: {name_match.group(0) if name_match else 'None'}")
-        logger.debug(f"Prompt Match: {prompt_match.group(0) if prompt_match else 'None'}")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse JSON from AI response. Error: {e}. Full output: {generated_str}")
+            raise ValueError(f"Could not parse AI output. The model did not return valid JSON. Response: {generated_str[:200]}...")
+        # --- MODIFICATION END ---
 
-        name = name_match.group(1).strip() if name_match else "Unnamed NSFW Persona"
-        prompt_text = prompt_match.group(1).strip() if prompt_match else generated_str.strip() # Fallback to full string
-
-        if not name_match or not prompt_match:
-            logger.warning(f"AI output format unexpected for NSFW persona generation. Full output: {generated_str}")
-            if not name_match and not prompt_match:
-                raise ValueError("Could not parse AI output for name and prompt.")
-            if not name_match: name = "Generated NSFW Persona"
-            if not prompt_match: prompt_text = generated_str # Use entire output as prompt if prompt tag not found
-
-        context.chat_data['generated_persona'] = {"name": name, "prompt": prompt_text, "category": "nsfw"}
+        context.chat_data['generated_persona'] = {"name": name, "prompt": prompt_text, "category": "nsfw"} #
         
-        # HTML escape name and prompt for display
-        text = f"<b>Generated NSFW Persona:</b>\n\n<b>Name:</b> {html.escape(name)}\n\n<b>Prompt:</b>\n<code>{html.escape(prompt_text)}</code>"
-        buttons = [
-            [InlineKeyboardButton("✅ Use This Persona", callback_data="persona_use_generated")],
-            [InlineKeyboardButton("🔄 Regenerate", callback_data="hub_persona_surprise_nsfw")],
-            [InlineKeyboardButton("« Cancel", callback_data="persona_menu_back")]
+        text = f"<b>Generated NSFW Persona:</b>\n\n<b>Name:</b> {html.escape(name)}\n\n<b>Prompt:</b>\n<code>{html.escape(prompt_text)}</code>" #
+        buttons = [ #
+            [InlineKeyboardButton("✅ Use This Persona", callback_data="persona_use_generated")], #
+            [InlineKeyboardButton("🔄 Regenerate", callback_data="hub_persona_surprise_nsfw")], #
+            [InlineKeyboardButton("« Cancel", callback_data="persona_menu_back")] #
         ]
-        # Edit the message to show the generated persona and action buttons
-        await message_to_edit.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
-        return config.NSFW_GEN_CONFIRM
-    except Exception as e:
-        logger.error(f"Failed to generate NSFW persona: {e}", exc_info=True)
-        # Edit the message to show an error message
-        await message_to_edit.edit_text("Sorry, the AI failed to generate a persona. Please try again.")
-        # Ensure conversation ends or returns to a stable state on error
-        return ConversationHandler.END 
+        await message_to_edit.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML) #
+        return config.NSFW_GEN_CONFIRM #
+    except Exception as e: #
+        logger.error(f"Failed to generate NSFW persona: {e}", exc_info=True) #
+        await message_to_edit.edit_text(f"Sorry, the AI failed to generate a persona. Error: {html.escape(str(e))}") # Display the error for easier debugging
+        return ConversationHandler.END #
 
 # --- Exported Functions for the Assembler ---
 def get_states():

@@ -73,7 +73,7 @@ async def is_service_online() -> bool:
 
 async def get_chat_response(messages: List[Dict[str, str]], task_type: str = "chat", stream: bool = False) -> AsyncGenerator[str, None]:
     """
-    Calls the AI model and streams the response.
+    Calls the AI model and streams the response using the model specified in the config.
 
     Args:
         messages (List[Dict[str, str]]): The list of messages for the prompt.
@@ -86,66 +86,58 @@ async def get_chat_response(messages: List[Dict[str, str]], task_type: str = "ch
     Raises:
         ConnectionError: If the AI service is unavailable or client not initialized.
         APITimeoutError: If the request times out.
-        ValueError: If no model can be found or auto-detected.
+        ValueError: If no model is specified in the config for the given task type.
     """
-    if ai_client is None:
-        init_ai_client() # Attempt to initialize if not already
-        if ai_client is None:
-            logger.error("AI client is not initialized and cannot be. Cannot get chat response.")
-            raise ConnectionError("AI client is not initialized. Check LM_STUDIO_API_BASE configuration.")
+    if ai_client is None: #
+        init_ai_client() #
+        if ai_client is None: #
+            logger.error("AI client is not initialized and cannot be. Cannot get chat response.") #
+            raise ConnectionError("AI client is not initialized. Check LM_STUDIO_API_BASE configuration.") #
     
-    params = config.AI_PARAMS.get(task_type, config.AI_PARAMS["chat"])
-    model_name = params.get("model")
+    params = config.AI_PARAMS.get(task_type, config.AI_PARAMS["chat"]) #
+    model_name = params.get("model") #
 
-    if not model_name or model_name.startswith("lm-studio-"): # Check if it's a default placeholder or None
-        # Auto-detect model if not specified in config or is a placeholder default
-        try:
-            # Using asyncio.to_thread as client.models.list is typically blocking
-            loaded_models = await asyncio.to_thread(ai_client.models.list)
-            # Ensure there's at least one model
-            if loaded_models.data:
-                model_name = loaded_models.data[0].id
-                logger.info(f"Auto-detected AI model for '{task_type}' task: {model_name}")
-            else:
-                raise ValueError("No models found on LM Studio server. Cannot auto-detect.")
-        except Exception as e:
-            logger.error(f"Could not auto-detect a model for task '{task_type}' from LM Studio: {e}", exc_info=True)
-            raise ConnectionError(f"Could not find or auto-detect a model for task '{task_type}'. Ensure a model is loaded in LM Studio and config is correct.") from e
+    # --- MODIFICATION START ---
+    # Removed the auto-detection logic. Now we strictly require a model from config.
+    if not model_name or model_name.startswith("lm-studio-"):
+        logger.error(f"No model specified for task type '{task_type}' in config. Please configure AI_PARAMS.")
+        raise ValueError(f"No model specified for task type '{task_type}' in config.")
+    # --- MODIFICATION END ---
     
-    logger.debug(f"Calling AI with model: {model_name}, task_type: {task_type}, stream: {stream}")
+    logger.debug(f"Calling AI with model: {model_name}, task_type: {task_type}, stream: {stream}") #
     try:
         # Using asyncio.to_thread as client.chat.completions.create is typically blocking
-        response_stream = await asyncio.to_thread(
-            ai_client.chat.completions.create,
-            model=model_name,
-            messages=messages,
-            stream=stream,
-            max_tokens=config.MAX_RESPONSE_TOKENS,
-            temperature=params.get("temperature", 0.7),
+        response_stream = await asyncio.to_thread( #
+            ai_client.chat.completions.create, #
+            model=model_name, #
+            messages=messages, #
+            stream=stream, #
+            max_tokens=config.MAX_RESPONSE_TOKENS, #
+            temperature=params.get("temperature", 0.7), #
         )
 
-        if stream:
-            for chunk in response_stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-        else:
+        if stream: #
+            for chunk in response_stream: #
+                if chunk.choices and chunk.choices[0].delta.content: #
+                    yield chunk.choices[0].delta.content #
+        else: #
             # If not streaming, yield the whole message at once.
             # Ensure content is always a string.
-            content = response_stream.choices[0].message.content
-            if content is not None:
-                yield content.strip()
-            else:
-                yield "" # Yield empty string if content is None
+            content = response_stream.choices[0].message.content #
+            if content is not None: #
+                yield content.strip() #
+            else: #
+                yield "" #
 
-    except APITimeoutError as e:
-        logger.warning(f"AI request timed out for task '{task_type}': {e}.")
-        raise e
-    except APIConnectionError as e:
-        logger.error(f"AI connection error for task '{task_type}': {e}. Check LM Studio server status and configuration.")
-        raise ConnectionError("Failed to connect to AI service. It might be offline or misconfigured.") from e
-    except Exception as e:
-        logger.critical(f"Unexpected AI error during '{task_type}' task: {e}", exc_info=True)
-        raise e
+    except APITimeoutError as e: #
+        logger.warning(f"AI request timed out for task '{task_type}': {e}.") #
+        raise e #
+    except APIConnectionError as e: #
+        logger.error(f"AI connection error for task '{task_type}': {e}. Check LM Studio server status and configuration.") #
+        raise ConnectionError("Failed to connect to AI service. It might be offline or misconfigured.") from e #
+    except Exception as e: #
+        logger.critical(f"Unexpected AI error during '{task_type}' task: {e}", exc_info=True) #
+        raise e #
 
 async def get_generation(prompt: str, task_type: str = "creative") -> str:
     """Gets a single, non-streamed response for generation tasks."""

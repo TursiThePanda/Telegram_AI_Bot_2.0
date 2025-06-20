@@ -23,6 +23,12 @@ def delete_pycache_dirs(start_path):
     logger.info("Finished deleting __pycache__ directories.")
 
 if __name__ == '__main__':
-    project_root = os.getcwd() # Assumes the script is run from the bot's root directory
+    # --- MODIFICATION START ---
+    # Get the directory where this script is located (e.g., /path/to/project/utilities)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Get the parent directory of the script's directory, which is the project root
+    project_root = os.path.dirname(script_dir)
+    # --- MODIFICATION END ---
+
     delete_pycache_dirs(project_root)
     logger.info("Pycache cleanup complete.")

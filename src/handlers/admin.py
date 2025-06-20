@@ -248,33 +248,32 @@ def register(application: Application):
     
     # MOTD sub-conversation
     motd_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(motd_menu_handler, pattern="^admin_motd_menu$")],
+        entry_points=[CallbackQueryHandler(motd_menu_handler, pattern="^admin_motd_menu$")], #
         states={
-            EDITING_MOTD: [
-                CallbackQueryHandler(motd_prompt_edit, pattern="^admin_motd_edit$"),
-                CallbackQueryHandler(motd_disable, pattern="^admin_motd_disable$"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, motd_receive_text)
+            EDITING_MOTD: [ #
+                CallbackQueryHandler(motd_prompt_edit, pattern="^admin_motd_edit$"), #
+                CallbackQueryHandler(motd_disable, pattern="^admin_motd_disable$"), #
+                MessageHandler(filters.TEXT & ~filters.COMMAND, motd_receive_text) #
             ]
         },
         fallbacks=[
-            CallbackQueryHandler(motd_cancel, pattern="^admin_motd_cancel$"),
-            CommandHandler('cancel', motd_cancel)
+            CallbackQueryHandler(motd_cancel, pattern="^admin_motd_cancel$"), #
+            CommandHandler('cancel', motd_cancel) #
         ],
-        per_user=True, # Added for consistency, typically ConversationHandlers are per_user/per_chat
-        per_chat=True,
-        persistent=True, # <--- ADD THIS
-        name="motd_conversation_handler" # <--- ADD A UNIQUE NAME
+        per_user=True, #
+        per_chat=True, #
+        # --- MODIFICATION START ---
+        persistent=True,
+        name="motd_conversation_handler"
+        # --- MODIFICATION END ---
     )
 
     # Main admin panel dispatcher for specific actions and menu navigation
-    admin_panel_dispatcher = CallbackQueryHandler(
-        admin_menu_callback,
-        pattern="^admin_(toggle_streaming|toggle_vector|reload|performance|status|menu_back)$"
+    admin_panel_dispatcher = CallbackQueryHandler( #
+        admin_menu_callback, #
+        pattern="^admin_(toggle_streaming|toggle_vector|reload|performance|status|menu_back)$" #
     )
 
-    application.add_handler(CommandHandler("admin", admin_menu_command))
-    application.add_handler(motd_conv) # Register the MOTD conversation handler
-    application.add_handler(admin_panel_dispatcher)
-    # Removed direct CommandHandler for /reload as it's accessible via admin menu for simplicity.
-    # If a direct /reload command outside the admin menu is desired, it can be re-added.
-    # application.add_handler(CommandHandler("reload", reload_command))
+    application.add_handler(CommandHandler("admin", admin_menu_command)) #
+    application.add_handler(motd_conv) #
+    application.add_handler(admin_panel_dispatcher) #

@@ -52,6 +52,14 @@ def init_db():
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            # --- ADDITION START ---
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS user_rate_limits (
+                    user_id INTEGER PRIMARY KEY,
+                    last_message_timestamp REAL NOT NULL
+                )
+            ''')
+            # --- ADDITION END ---
             cur.execute('CREATE INDEX IF NOT EXISTS idx_chat_id_timestamp ON conversations (chat_id, timestamp DESC)')
             con.commit()
         logger.info("SQLite database initialized successfully.")
@@ -68,7 +76,7 @@ def init_db():
     try:
         # Also ensure the vector DB path exists
         os.makedirs(config.VECTOR_DB_PATH, exist_ok=True)
-        
+
         logger.info(f"Loading embedding model: {config.EMBEDDING_MODEL_NAME}...")
         embedding_model = SentenceTransformer(config.EMBEDDING_MODEL_NAME)
         vector_db_client = chromadb.PersistentClient(path=config.VECTOR_DB_PATH)
@@ -127,6 +135,24 @@ async def get_db_connection():
     finally:
         await db_pool.return_connection(conn)
 
+# --- NEW FUNCTIONS START ---
+async def get_user_timestamp(user_id: int) -> float:
+    """Retrieves the last message timestamp for a given user."""
+    async with get_db_connection() as con:
+        cursor = await asyncio.to_thread(con.execute, "SELECT last_message_timestamp FROM user_rate_limits WHERE user_id = ?", (user_id,))
+        row = await asyncio.to_thread(cursor.fetchone)
+        return row[0] if row else 0.0
+
+async def update_user_timestamp(user_id: int, timestamp: float):
+    """Updates or inserts the last message timestamp for a given user."""
+    async with get_db_connection() as con:
+        await asyncio.to_thread(
+            con.execute,
+            "INSERT OR REPLACE INTO user_rate_limits (user_id, last_message_timestamp) VALUES (?, ?)",
+            (user_id, timestamp)
+        )
+        await asyncio.to_thread(con.commit)
+# --- NEW FUNCTIONS END ---
 
 # --- Core Database Functions ---
 async def add_message_to_db(chat_id: int, role: str, content: str):
@@ -203,8 +229,13 @@ async def delete_last_interaction(chat_id: int):
 async def clear_history(chat_id: int):
     """Deletes all data for a user from the databases."""
     async with get_db_connection() as con:
+        # --- MODIFICATION START ---
+        # Also clear the rate limit timestamp when history is cleared
+        await asyncio.to_thread(con.execute, "DELETE FROM user_rate_limits WHERE user_id = ?", (chat_id,))
+        # --- MODIFICATION END ---
         await asyncio.to_thread(con.execute, "DELETE FROM conversations WHERE chat_id = ?", (chat_id,))
         await asyncio.to_thread(con.commit)
+
     if config.VECTOR_MEMORY_ENABLED and memory_collection:
         try:
             await asyncio.to_thread(memory_collection.delete, where={"chat_id": chat_id})

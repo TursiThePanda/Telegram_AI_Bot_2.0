@@ -20,10 +20,16 @@ def delete_directory(path):
 
 def main():
     """Performs a clean slate operation for the bot project."""
-    project_root = os.getcwd()
+    # --- MODIFICATION START ---
+    # Get the directory where this script is located (e.g., /path/to/project/utilities)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Get the parent directory of the script's directory, which is the project root
+    project_root = os.path.dirname(script_dir)
+    # --- MODIFICATION END ---
+    
     logger.info(f"Starting clean slate operation in: {project_root}")
 
-    # 1. Delete all __pycache__ directories
+    # 1. Delete all __pycache__ directories 
     logger.info("Searching for and deleting __pycache__ directories...")
     for dirpath, dirnames, filenames in os.walk(project_root):
         if '__pycache__' in dirnames:
@@ -33,7 +39,7 @@ def main():
             dirnames.remove('__pycache__') 
     logger.info("Finished deleting __pycache__ directories.")
 
-    # 2. Delete the /data directory
+    # 2. Delete the /data directory 
     logger.info("Deleting the /data directory...")
     data_dir_path = os.path.join(project_root, 'data')
     delete_directory(data_dir_path)
