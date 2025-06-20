@@ -77,7 +77,13 @@ def get_entry_points():
 
 def get_fallbacks():
     """Returns the fallbacks for the conversation."""
-    return [CommandHandler("cancel", cancel_command)]
+    # --- FIX: Import setup_hub_command locally to be used in the fallback ---
+    from .hub import setup_hub_command
+    return [
+        # --- FIX: Add a callback query handler for the main "back" button ---
+        CallbackQueryHandler(setup_hub_command, pattern="^hub_back$"),
+        CommandHandler("cancel", cancel_command)
+    ]
 
 def get_states():
     """Returns the state handlers managed by this module."""

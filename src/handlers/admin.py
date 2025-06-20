@@ -37,10 +37,11 @@ TOGGLES_FILE = os.path.join(config.DATA_DIR, "admin_toggles.json")
 
 def load_admin_toggles():
     # Load with default empty dict if file is missing/broken
-    data = load_json(TOGGLES_FILE, default={})
+    data = load_json(TOGGLES_FILE, default={}) #
     return {
-        "streaming_enabled": data.get("streaming_enabled", True), # Default to True if not in file
-        "vector_memory_enabled": data.get("vector_memory_enabled", config.VECTOR_MEMORY_ENABLED) # Use config default if not in file
+        # --- FIX: Changed default value from True to False ---
+        "streaming_enabled": data.get("streaming_enabled", False),
+        "vector_memory_enabled": data.get("vector_memory_enabled", config.VECTOR_MEMORY_ENABLED) #
     }
 
 def save_admin_toggles(context):
@@ -105,23 +106,24 @@ async def _get_status_text() -> str:
 # --- Menu Display Functions ---
 async def _display_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the main admin panel, editing the message if it's from a callback."""
-    streaming_enabled = context.bot_data.get('streaming_enabled', True)
-    vector_mem_enabled = context.bot_data.get('vector_memory_enabled', config.VECTOR_MEMORY_ENABLED)
+    # --- FIX: Changed default value from True to False ---
+    streaming_enabled = context.bot_data.get('streaming_enabled', False)
+    vector_mem_enabled = context.bot_data.get('vector_memory_enabled', config.VECTOR_MEMORY_ENABLED) #
 
-    buttons = [
-        [InlineKeyboardButton("📊 Performance", callback_data="admin_performance"), InlineKeyboardButton("📡 System Status", callback_data="admin_status")],
-        [InlineKeyboardButton(f"💨 AI Chat Streaming: {'ON' if streaming_enabled else 'OFF'}", callback_data="admin_toggle_streaming")],
-        [InlineKeyboardButton(f"🧠 Vector memory: {'ON' if vector_mem_enabled else 'OFF'}", callback_data="admin_toggle_vector")],
-        [InlineKeyboardButton("📢 Manage MOTD", callback_data="admin_motd_menu")],
-        [InlineKeyboardButton("🔄 Reload Files", callback_data="admin_reload")]
+    buttons = [ #
+        [InlineKeyboardButton("📊 Performance", callback_data="admin_performance"), InlineKeyboardButton("📡 System Status", callback_data="admin_status")], #
+        [InlineKeyboardButton(f"💨 AI Chat Streaming: {'ON' if streaming_enabled else 'OFF'}", callback_data="admin_toggle_streaming")], #
+        [InlineKeyboardButton(f"🧠 Vector memory: {'ON' if vector_mem_enabled else 'OFF'}", callback_data="admin_toggle_vector")], #
+        [InlineKeyboardButton("📢 Manage MOTD", callback_data="admin_motd_menu")], #
+        [InlineKeyboardButton("🔄 Reload Files", callback_data="admin_reload")] #
     ]
-    markup = InlineKeyboardMarkup(buttons)
-    text = "<b>👑 Admin Panel</b>"
+    markup = InlineKeyboardMarkup(buttons) #
+    text = "<b>👑 Admin Panel</b>" #
     
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
-    else:
-        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    if update.callback_query: #
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML) #
+    else: #
+        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML) #
 
 # --- MOTD Sub-Conversation Handlers ---
 async def motd_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -178,44 +180,43 @@ async def admin_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Entry point for the /admin command."""
     await _display_admin_menu(update, context)
 
-@owner_only
+@owner_only #
 async def admin_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Dispatcher for the main admin menu buttons (excluding MOTD, performance, status)."""
-    query = update.callback_query
-    await query.answer()
-    action = query.data
+    query = update.callback_query #
+    await query.answer() #
+    action = query.data #
 
     # Always ensure toggles are loaded in bot_data for consistency
-    if 'streaming_enabled' not in context.bot_data or 'vector_memory_enabled' not in context.bot_data:
-        toggles = load_admin_toggles()
-        context.bot_data['streaming_enabled'] = toggles['streaming_enabled']
-        context.bot_data['vector_memory_enabled'] = toggles['vector_memory_enabled']
+    if 'streaming_enabled' not in context.bot_data or 'vector_memory_enabled' not in context.bot_data: #
+        toggles = load_admin_toggles() #
+        context.bot_data['streaming_enabled'] = toggles['streaming_enabled'] #
+        context.bot_data['vector_memory_enabled'] = toggles['vector_memory_enabled'] #
 
-    if action == "admin_toggle_streaming":
-        context.bot_data['streaming_enabled'] = not context.bot_data.get('streaming_enabled', True)
-        await _display_admin_menu(update, context) # Re-display to show new state
-    elif action == "admin_toggle_vector":
-        context.bot_data['vector_memory_enabled'] = not context.bot_data.get('vector_memory_enabled', config.VECTOR_MEMORY_ENABLED)
-        await _display_admin_menu(update, context) # Re-display to show new state
-    elif action == "admin_reload":
-        await reload_command(update, context, from_callback=True)
-        # No need to re-display admin menu here, reload_command sends a message, and
-        # user can press 'back' or 'admin' again.
-    elif action == "admin_performance":
-        text = _get_performance_text(context)
-        buttons = [[InlineKeyboardButton("« Back", callback_data="admin_menu_back")]]
-        markup = InlineKeyboardMarkup(buttons)
-        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
-    elif action == "admin_status":
-        text = await _get_status_text()
-        buttons = [[InlineKeyboardButton("« Back", callback_data="admin_menu_back")]]
-        markup = InlineKeyboardMarkup(buttons)
-        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
-    elif action == "admin_menu_back":
-        await _display_admin_menu(update, context)
+    if action == "admin_toggle_streaming": #
+        # --- FIX: Changed default value from True to False ---
+        context.bot_data['streaming_enabled'] = not context.bot_data.get('streaming_enabled', False)
+        await _display_admin_menu(update, context) #
+    elif action == "admin_toggle_vector": #
+        context.bot_data['vector_memory_enabled'] = not context.bot_data.get('vector_memory_enabled', config.VECTOR_MEMORY_ENABLED) #
+        await _display_admin_menu(update, context) #
+    elif action == "admin_reload": #
+        await reload_command(update, context, from_callback=True) #
+    elif action == "admin_performance": #
+        text = _get_performance_text(context) #
+        buttons = [[InlineKeyboardButton("« Back", callback_data="admin_menu_back")]] #
+        markup = InlineKeyboardMarkup(buttons) #
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML) #
+    elif action == "admin_status": #
+        text = await _get_status_text() #
+        buttons = [[InlineKeyboardButton("« Back", callback_data="admin_menu_back")]] #
+        markup = InlineKeyboardMarkup(buttons) #
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML) #
+    elif action == "admin_menu_back": #
+        await _display_admin_menu(update, context) #
 
     # Persist admin toggles after any change
-    save_admin_toggles(context)
+    save_admin_toggles(context) #
 
 
 @owner_only

@@ -22,24 +22,25 @@ def _build_scene_generation_prompt(genre: str) -> str:
 
 async def scenery_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Displays the main scenery selection menu."""
-    query = update.callback_query
-    await query.answer()
-    all_sceneries = context.bot_data.get('sceneries', {})
-    nsfw_enabled = context.user_data.get('nsfw_enabled', False)
-    full_scenery_data = context.bot_data.get('sceneries_full_data', {})
-    buttons = []
-    for name in sorted(all_sceneries.keys()):
-        if not nsfw_enabled and full_scenery_data.get(name, {}).get("category", "").lower() == "nsfw":
+    query = update.callback_query #
+    await query.answer() #
+    all_sceneries = context.bot_data.get('sceneries', {}) #
+    nsfw_enabled = context.user_data.get('nsfw_enabled', False) #
+    full_scenery_data = context.bot_data.get('sceneries_full_data', {}) #
+    buttons = [] #
+    for name in sorted(all_sceneries.keys()): #
+        if not nsfw_enabled and full_scenery_data.get(name, {}).get("category", "").lower() == "nsfw": #
             continue
-        buttons.append([InlineKeyboardButton(name, callback_data=f"scenery_select_{name}")])
-    buttons.append([InlineKeyboardButton("✨ Generate New Scene", callback_data="scenery_generate_new")])
-    buttons.append([InlineKeyboardButton("« Back to Setup Hub", callback_data="setup_back")])
-    await query.edit_message_text(
-        "<b>🏞️ Select a Scene</b>",
-        reply_markup=InlineKeyboardMarkup(buttons),
-        parse_mode=ParseMode.HTML
+        buttons.append([InlineKeyboardButton(name, callback_data=f"scenery_select_{name}")]) #
+    buttons.append([InlineKeyboardButton("✨ Generate New Scene", callback_data="scenery_generate_new")]) #
+    # --- FIX: Changed callback_data from "setup_back" to "hub_back" ---
+    buttons.append([InlineKeyboardButton("« Back to Setup Hub", callback_data="hub_back")])
+    await query.edit_message_text( #
+        "<b>🏞️ Select a Scene</b>", #
+        reply_markup=InlineKeyboardMarkup(buttons), #
+        parse_mode=ParseMode.HTML #
     )
-    return config.SCENERY_MENU
+    return config.SCENERY_MENU #
 
 async def receive_scenery_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Applies a chosen scenery and provides navigation back to the scenery menu."""
@@ -115,14 +116,15 @@ async def use_generated_scene(update: Update, context: ContextTypes.DEFAULT_TYPE
 def get_states():
     """Returns the state handlers for the scenery module."""
     return {
-        config.SCENERY_MENU: [
-            CallbackQueryHandler(receive_scenery_choice, pattern="^scenery_select_"),
-            CallbackQueryHandler(prompt_scene_genre, pattern="^scenery_generate_new$"),
-            CallbackQueryHandler(use_generated_scene, pattern="^scenery_use_generated$"),
-            CallbackQueryHandler(scenery_menu, pattern="^scenery_menu_back$"),
+        config.SCENERY_MENU: [ #
+            CallbackQueryHandler(receive_scenery_choice, pattern="^scenery_select_"), #
+            CallbackQueryHandler(prompt_scene_genre, pattern="^scenery_generate_new$"), #
+            CallbackQueryHandler(use_generated_scene, pattern="^scenery_use_generated$"), #
+            CallbackQueryHandler(scenery_menu, pattern="^scenery_menu_back$"), #
         ],
-        config.SCENE_GENRE_SELECT: [
-            CallbackQueryHandler(generate_new_scene, pattern="^scene_gen_"),
+        config.SCENE_GENRE_SELECT: [ #
+            CallbackQueryHandler(generate_new_scene, pattern="^scene_gen_"), #
+            # --- FIX: Added the missing "back" handler to this state ---
             CallbackQueryHandler(scenery_menu, pattern="^scenery_menu_back$"),
         ],
     }

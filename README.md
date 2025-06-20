@@ -16,6 +16,7 @@ This bot is built with a robust, modular architecture and includes a wide array 
     * Use the AI to generate entirely new, unique personas and environments on the fly.
 * **Secure Admin Panel**: A comprehensive, owner-only admin panel (`/admin`) allows for real-time monitoring, system status checks, and runtime toggling of core features.
 * **Persistent & Resilient**: User data, custom personas, and conversation states are persisted across bot restarts. Background tasks ensure stable operation.
+* **Persistent Rate-Limiting**: Protects the bot from spam by enforcing a persistent, per-user time limit between messages.
 * **[Optional & Pluggable NSFW Module](#content-moderation--nsfw-features)**: Includes a self-contained module for NSFW content that is designed for complete user and admin control.
 
 ---
@@ -62,6 +63,7 @@ The entire NSFW feature set is built as a self-contained "plug-in". If you wish 
         LM_STUDIO_API_BASE=http://localhost:1234/v1
 
         # --- AI Model Naming (Required) ---
+        # The bot no longer auto-detects models. You must specify the model file name.
         LM_STUDIO_CHAT_MODEL=repository/your-model-name-gguf
         LM_STUDIO_CREATIVE_MODEL=repository/your-model-name-gguf
 
