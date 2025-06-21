@@ -225,36 +225,33 @@ def get_states():
             config.NSFW_GEN_GENDER: [CallbackQueryHandler(ask_role, pattern="^nsfw_gender_")],
             config.NSFW_GEN_ROLE: [CallbackQueryHandler(ask_fetishes, pattern="^nsfw_role_")],
             config.NSFW_GEN_FETISHES: [CallbackQueryHandler(handle_fetish_selection, pattern="^nsfw_fetish_")],
-            config.NSFW_GEN_CONFIRM: [ # Add confirm state for regenerate/use/cancel buttons
-                CallbackQueryHandler(generate_and_confirm, pattern="^hub_persona_surprise_nsfw$"), # Regenerate: re-enters same function
-                CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$"), # Use it
-                CallbackQueryHandler(lambda u,c: config.PERSONA_MENU, pattern="^persona_menu_back$") # Cancel: back to parent menu
+            config.NSFW_GEN_CONFIRM: [
+                CallbackQueryHandler(generate_and_confirm, pattern="^hub_persona_surprise_nsfw$"), # Regenerate
+                # --- FIX: Moved the handler for 'Use This Persona' inside the correct state ---
+                CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$"), 
+                CallbackQueryHandler(lambda u,c: config.PERSONA_MENU, pattern="^persona_menu_back$") # Cancel
             ]
         },
         fallbacks=[
-            # If user clicks 'Surprise Me!' again while in any NSFW generation state,
-            # this fallback will catch it and restart the conversation.
-            CallbackQueryHandler(start_nsfw_generation, pattern="^hub_persona_surprise_nsfw$"), # <--- ADDED THIS FALLBACK
+            CallbackQueryHandler(start_nsfw_generation, pattern="^hub_persona_surprise_nsfw$"),
             CallbackQueryHandler(lambda u,c: config.PERSONA_MENU, pattern="^persona_menu_back$"),
-            CommandHandler('cancel', lambda u,c: config.PERSONA_MENU) # Global cancel also returns to persona menu
+            CommandHandler('cancel', lambda u,c: config.PERSONA_MENU) 
         ],
         map_to_parent={
-            # Map END of this sub-conversation to the parent conversation's PERSONA_MENU state
             ConversationHandler.END: config.PERSONA_MENU,
-            # Explicitly map NSFW_GEN_CONFIRM state (if exited from there directly) to PERSONA_MENU.
-            # This is critical for exiting the sub-conversation correctly.
             config.NSFW_GEN_CONFIRM: config.PERSONA_MENU, 
         },
-        per_user=True, # Ensure per_user for persistence
-        per_chat=True, # Ensure per_chat for persistence
-        persistent=True, # Ensure nested ConversationHandler is persistent
-        name="nsfw_persona_conversation_handler", # Ensure unique name for persistence
-        allow_reentry=True # <--- ENSURE THIS IS TRUE for the overall conversation handler
+        per_user=True,
+        per_chat=True,
+        persistent=True,
+        name="nsfw_persona_conversation_handler",
+        allow_reentry=True
     )
     
     return {
         config.PERSONA_MENU: [
             nsfw_persona_conv,
-            CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$")
+            # --- FIX: Removed the duplicate handler from here ---
+            # CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$")
         ]
     }
