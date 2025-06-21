@@ -39,7 +39,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def receive_name_for_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Saves the user's character name and asks for their profile."""
     context.user_data['user_display_name'] = update.message.text.strip()
-    await update.message.reply_text("Name set.\n\nNow, please describe your character's profile (e.g., appearance, personality).")
+    # --- MODIFICATION START: Added a clear instruction for the user ---
+    text = (
+        "Name set.\n\n"
+        "Now, please describe your character's profile (e.g., appearance, personality).\n\n"
+        "<i>For the best results, please write in the third person (e.g., \"He is a brave knight...\" instead of \"I am a brave knight...\").</i>"
+    )
+    await update.message.reply_html(text)
+    # --- MODIFICATION END ---
     return config.ASK_PROFILE
 
 async def receive_profile_for_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
