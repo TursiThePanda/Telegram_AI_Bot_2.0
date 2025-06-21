@@ -20,7 +20,6 @@ except (ValueError, TypeError):
 # --- Directory Paths ---
 DATA_DIR = "data"
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
-# FIX: Added the missing USER_LOGS_DIR variable
 USER_LOGS_DIR = os.path.join(LOGS_DIR, "user_logs")
 PERSISTENCE_DIR = os.path.join(DATA_DIR, "persistence")
 DB_DIR = os.path.join(DATA_DIR, "database")
@@ -40,15 +39,18 @@ LM_STUDIO_API_BASE: Optional[str] = os.getenv("LM_STUDIO_API_BASE")
 AI_TIMEOUT = 300.0
 MAX_RESPONSE_TOKENS = 2048
 AI_PARAMS = {
-    # Provide sensible default model names if env vars are not set
     "chat": {"model": os.getenv("LM_STUDIO_CHAT_MODEL", "lm-studio-chat-default"), "temperature": 0.7},
     "creative": {"model": os.getenv("LM_STUDIO_CREATIVE_MODEL", "lm-studio-creative-default"), "temperature": 1.1},
-    "utility": {"model": os.getenv("LM_STUDIO_UTILITY_MODEL", "lm-studio-utility-default"), "temperature": 0.5}, # Added for SFW persona generation
+    "utility": {"model": os.getenv("LM_STUDIO_UTILITY_MODEL", "lm-studio-utility-default"), "temperature": 0.5},
 }
 
 # --- Performance & Rate Limiting ---
 STREAM_UPDATE_INTERVAL = 1.5
 USER_RATE_LIMIT = 1.0
+PERFORMANCE_REPORTING_ENABLED = os.getenv("PERFORMANCE_REPORTING_ENABLED", "0") == "1"
+# --- User chat logging ---
+USER_LOGGING_ENABLED = os.getenv("USER_LOGGING_ENABLED", "0") == "1"
+
 
 # --- Debugging Configuration ---
 DEBUG_LOGGING = os.getenv("DEBUG_LOGGING", "0") == "1"
@@ -87,4 +89,4 @@ DEBUG_LOGGING = os.getenv("DEBUG_LOGGING", "0") == "1"
     NSFW_GEN_FETISHES,        # 18
     NSFW_GEN_CONFIRM,         # 19
 
-) = range(20) # Total number of states
+) = range(20)

@@ -60,12 +60,23 @@ async def post_init(application: Application):
     logger.info(f"Loaded {len(application.bot_data['personas'])} personas and {len(application.bot_data['sceneries'])} sceneries.")
     
     logger.info("Starting background tasks...")
-    task_coroutines = [tasks.performance_report_task(), tasks.health_check_task(application)]
+    # --- MODIFICATION START ---
+    # Always start the health check task
+    task_coroutines = [tasks.health_check_task(application)]
+    
+    # Conditionally start the performance report task based on the config setting
+    if config.PERFORMANCE_REPORTING_ENABLED:
+        task_coroutines.append(tasks.performance_report_task())
+        logger.info("Performance reporting is ENABLED by config.")
+    else:
+        logger.info("Performance reporting is DISABLED by config.")
+
     for task_coro in task_coroutines:
         task = asyncio.create_task(task_coro)
         background_tasks.add(task)
         # Add a done callback to remove the task from the set once it completes (or is cancelled/fails)
         task.add_done_callback(background_tasks.discard) 
+    # --- MODIFICATION END ---
     logger.info(f"{len(background_tasks)} background tasks scheduled.")
     
     logger.info("Setting bot command menu...")

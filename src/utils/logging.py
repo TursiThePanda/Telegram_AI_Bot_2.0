@@ -6,6 +6,9 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
+# --- MODIFICATION START ---
+from typing import Optional
+# --- MODIFICATION END ---
 import src.config as config
 
 logger = logging.getLogger(__name__)
@@ -37,3 +40,45 @@ def setup_logging():
         logging.getLogger(lib_name).setLevel(logging.WARNING)
 
     logger.info("Logging configured successfully.")
+
+# --- Per-User Conversation Logging ---
+
+_user_loggers = {} # Cache for user logger instances
+
+def get_user_logger(user_id: int, username: Optional[str] = None) -> Optional[logging.Logger]:
+    """
+    Creates and returns a dedicated logger for a specific user ID that saves
+    their conversation to a separate file. Returns None if feature is disabled.
+    """
+    if not config.USER_LOGGING_ENABLED:
+        return None
+
+    if user_id in _user_loggers:
+        return _user_loggers[user_id]
+
+    try:
+        # Sanitize username to make it safe for a filename
+        sanitized_username = ''.join(c for c in username if c.isalnum() or c in ('-', '_')) if username else 'NoUsername'
+        log_file_name = f"{user_id}-{sanitized_username}.log"
+        log_file = os.path.join(config.USER_LOGS_DIR, log_file_name)
+        
+        # Create a logger for the specific user
+        user_logger = logging.getLogger(f"user.{user_id}")
+        user_logger.setLevel(logging.INFO)
+        user_logger.propagate = False
+
+        # Create a file handler for this user's log file
+        handler = RotatingFileHandler(
+            log_file, maxBytes=1 * 1024 * 1024, backupCount=1, encoding='utf-8'
+        )
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        
+        user_logger.addHandler(handler)
+        _user_loggers[user_id] = user_logger
+        
+        logger.info(f"Initialized conversation logger for user {user_id} ({sanitized_username}).")
+        return user_logger
+
+    except Exception as e:
+        logger.error(f"Failed to create logger for user {user_id}: {e}", exc_info=True)
+        return None
