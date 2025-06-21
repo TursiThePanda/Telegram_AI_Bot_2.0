@@ -3,11 +3,12 @@
 Database utility module for SQLite (conversation history) and ChromaDB
 (vector memory for personas and semantic search).
 """
+
 import logging
-import os
 import sqlite3
 import json
 import time
+import os
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, Any # Added Any for the Queue type hint
@@ -52,14 +53,12 @@ def init_db():
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            # --- ADDITION START ---
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS user_rate_limits (
                     user_id INTEGER PRIMARY KEY,
                     last_message_timestamp REAL NOT NULL
                 )
             ''')
-            # --- ADDITION END ---
             cur.execute('CREATE INDEX IF NOT EXISTS idx_chat_id_timestamp ON conversations (chat_id, timestamp DESC)')
             con.commit()
         logger.info("SQLite database initialized successfully.")
@@ -74,12 +73,22 @@ def init_db():
         return
 
     try:
-        # Also ensure the vector DB path exists
+        from chromadb.config import Settings
+        
         os.makedirs(config.VECTOR_DB_PATH, exist_ok=True)
-
+        
         logger.info(f"Loading embedding model: {config.EMBEDDING_MODEL_NAME}...")
         embedding_model = SentenceTransformer(config.EMBEDDING_MODEL_NAME)
-        vector_db_client = chromadb.PersistentClient(path=config.VECTOR_DB_PATH)
+        
+        vector_db_client = chromadb.PersistentClient(
+            path=config.VECTOR_DB_PATH,
+            settings=Settings(anonymized_telemetry=False)
+        )
+        
+        # --- MODIFICATION START ---
+        logger.info("ChromaDB telemetry explicitly disabled via settings.")
+        # --- MODIFICATION END ---
+        
         memory_collection = vector_db_client.get_or_create_collection(
             name=config.VECTOR_DB_COLLECTION,
             metadata={"hnsw:space": "cosine"}
@@ -158,25 +167,30 @@ async def update_user_timestamp(user_id: int, timestamp: float):
 async def add_message_to_db(chat_id: int, role: str, content: str):
     """Adds a message to SQLite and its vector embedding to ChromaDB."""
     db_id = None
-    async with get_db_connection() as con:
-        cursor = await asyncio.to_thread(
+    async with get_db_connection() as con: #
+        cursor = await asyncio.to_thread( #
             con.execute, "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)", (chat_id, role, content)
         )
-        db_id = cursor.lastrowid
-        await asyncio.to_thread(con.commit)
+        db_id = cursor.lastrowid #
+        await asyncio.to_thread(con.commit) #
 
-    if config.VECTOR_MEMORY_ENABLED and db_id and role == 'user' and embedding_model:
+    # --- MODIFICATION START ---
+    # The condition "role == 'user'" has been removed to allow both user and assistant
+    # messages to be added to the long-term vector memory.
+    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model:
+    # --- MODIFICATION END ---
         try:
-            embedding = await asyncio.to_thread(embedding_model.encode, [content])
-            await asyncio.to_thread(
+            embedding = await asyncio.to_thread(embedding_model.encode, [content]) #
+            await asyncio.to_thread( #
                 memory_collection.add,
                 embeddings=[embedding[0].tolist()],
                 documents=[content],
                 metadatas=[{"chat_id": chat_id, "timestamp": time.time()}],
                 ids=[str(db_id)]
             )
-        except Exception as e:
-            logger.error(f"Failed to add vector embedding for chat {chat_id} (SQLite ID: {db_id}): {e}", exc_info=True)
+        except Exception as e: #
+            logger.error(f"Failed to add vector embedding for chat {chat_id} (SQLite ID: {db_id}): {e}", exc_info=True) #
+
 
 async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, str]]:
     """Retrieves conversation history from SQLite."""
