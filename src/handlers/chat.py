@@ -15,6 +15,7 @@ import src.config as config
 from src.services import database as db_service
 from src.services import ai_models as ai_service
 from src.services import monitoring as monitoring_service
+from src.utils import logging as logging_utils
 
 logger = logging.getLogger(__name__)
 
