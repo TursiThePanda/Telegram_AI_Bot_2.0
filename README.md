@@ -10,10 +10,11 @@ This bot is built with a robust, modular architecture and includes a wide array 
 * **Advanced Dual-Memory System**:
     * **Short-Term Memory**: Uses an SQLite database to maintain turn-by-turn conversation flow accurately.
     * **Long-Term Semantic Memory**: Integrates with ChromaDB to create a vector-based memory, allowing the bot to recall thematically relevant events and information from the distant past.
-* **Dynamic Persona & Scenery System**:
-    * Choose from a list of pre-defined characters and scenes.
-    * Create, save, and use your own custom personas.
-    * Use the AI to generate entirely new, unique personas and environments on the fly.
+* **Dynamic Persona System**: Choose from a list of pre-defined characters or create and save your own custom personas.
+* **AI-Powered Content Generation**: Don't just pick from a list. Use the AI to dynamically:
+    * **Generate Random Personas**: Create completely new SFW or NSFW characters from scratch.
+    * **Generate a 'Perfect Partner'**: The AI can analyze your character profile to generate a complementary 'opposite' partner, who shares your kinks but has an opposing role, designed for dynamic role-play.
+    * **Generate New Scenes**: Create new environments on the fly from an expanded list of 12+ genres (including SFW and NSFW categories like Cyberpunk, Victorian, BDSM/Dungeon, and more).
 * **Secure Admin Panel**: A comprehensive, owner-only admin panel (`/admin`) allows for real-time monitoring, system status checks, and runtime toggling of core features.
 * **Persistent & Resilient**: User data, custom personas, and conversation states are persisted across bot restarts. Background tasks ensure stable operation.
 * **Persistent Rate-Limiting**: Protects the bot from spam by enforcing a persistent, per-user time limit between messages.
@@ -70,6 +71,8 @@ The entire NSFW feature set is built as a self-contained "plug-in". If you wish 
         # --- Feature Toggles (Optional) ---
         VECTOR_MEMORY_ENABLED=1
         DEBUG_LOGGING=0
+        PERFORMANCE_REPORTING_ENABLED=1 # Set to 1 to enable, 0 to disable
+        USER_LOGGING_ENABLED=1      # Set to 1 to enable, 0 to disable
         ```
 
 4.  **Run the Bot**
