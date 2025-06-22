@@ -6,11 +6,25 @@ from telegram.constants import ParseMode
 
 import src.config as config
 from src.utils import module_loader
+# --- MODIFICATION START: Added import for logging utils ---
+from src.utils import logging as logging_utils
+# --- MODIFICATION END ---
+
 
 NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
 
 async def setup_hub_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Displays the main setup hub with configuration options."""
+    # --- MODIFICATION START: Added command and UI logging ---
+    user = update.effective_user
+    user_logger = logging_utils.get_user_logger(user.id, user.username)
+
+    if update.callback_query and config.LOG_USER_UI_INTERACTIONS:
+        user_logger.info(f"UI_INTERACTION: Pressed button with data '{update.callback_query.data}'")
+    elif update.effective_message and config.LOG_USER_COMMANDS:
+        user_logger.info(f"COMMAND: {update.effective_message.text}")
+    # --- MODIFICATION END ---
+    
     query = update.callback_query
     if query:
         await query.answer()
@@ -30,11 +44,11 @@ async def setup_hub_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     markup = InlineKeyboardMarkup(buttons)
     text = "<b>⚙️ Setup Hub</b>\n\nConfigure your character and role-playing environment."
 
-    # Edit the message if coming from a button, otherwise send a new one.
     if query:
         await query.message.edit_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
     else:
-        await update.message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+        if update.effective_message:
+            await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
         
     return config.SETUP_HUB
 
@@ -45,7 +59,6 @@ def get_states():
     from .profile import profile_menu
     from .data_management import delete_menu
     
-    # Corrected import: Changed from relative '.nsfw' to absolute 'src.handlers.nsfw'
     if NSFW_MODULE_AVAILABLE:
         from src.handlers.nsfw import toggle_nsfw_handler
 

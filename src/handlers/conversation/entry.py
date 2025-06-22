@@ -3,13 +3,13 @@
 Handles the entry and exit points for the main conversation, including
 the initial user onboarding flow.
 """
-from telegram import Update, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup # <--- ADD InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-
 
 import src.config as config
 from src.services import database as db_service
 from src.utils import module_loader
+from src.utils import logging as logging_utils
 
 # Check for the NSFW module once
 NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
@@ -19,18 +19,22 @@ NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /start. Routes new vs. existing users."""
     user = update.effective_user
+    # --- Logging for /start command ---
+    if config.LOG_USER_COMMANDS:
+        user_logger = logging_utils.get_user_logger(user.id, user.username)
+        user_logger.info(f"COMMAND: /start")
+
     chat_id = update.effective_chat.id
 
-    # Crucial: Ensure chat_id is always stored for context, especially in group chats
     context.chat_data['chat_id'] = chat_id 
-    context.user_data['user_id'] = user.id # Also ensure user_id is stored if not already
+    context.user_data['user_id'] = user.id
 
     if motd := context.bot_data.get('motd'):
         await update.message.reply_html(f"<b>Message of the Day</b>\n\n{motd}")
 
     if 'user_display_name' in context.user_data:
         await update.message.reply_text(f"Welcome back, {context.user_data['user_display_name']}!")
-        await db_service.clear_history(user.id) # Clear history on re-start
+        await db_service.clear_history(user.id)
         return ConversationHandler.END
     else:
         await update.message.reply_html("<b>Welcome!</b> Let's create your character.\n\nFirst, what is your character's name?")
@@ -38,20 +42,36 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def receive_name_for_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Saves the user's character name and asks for their profile."""
-    context.user_data['user_display_name'] = update.message.text.strip()
-    # --- MODIFICATION START: Added a clear instruction for the user ---
+    # --- MODIFICATION START: Capture text before logging ---
+    name = update.message.text.strip()
+    if config.LOG_USER_UI_INTERACTIONS:
+        user = update.effective_user
+        user_logger = logging_utils.get_user_logger(user.id, user.username)
+        user_logger.info(f"UI_INPUT: Provided character name: '{name}'")
+    
+    context.user_data['user_display_name'] = name
+    # --- MODIFICATION END ---
+    
     text = (
         "Name set.\n\n"
         "Now, please describe your character's profile (e.g., appearance, personality).\n\n"
         "<i>For the best results, please write in the third person (e.g., \"He is a brave knight...\" instead of \"I am a brave knight...\").</i>"
     )
     await update.message.reply_html(text)
-    # --- MODIFICATION END ---
     return config.ASK_PROFILE
 
 async def receive_profile_for_setup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Saves the user's profile and checks if it should ask about NSFW."""
-    context.user_data['user_profile'] = update.message.text.strip()
+    profile = update.message.text.strip()
+    # --- MODIFICATION START: Log the full profile text ---
+    if config.LOG_USER_UI_INTERACTIONS:
+        user = update.effective_user
+        user_logger = logging_utils.get_user_logger(user.id, user.username)
+        # The log now includes the full profile text on new lines for readability
+        user_logger.info(f"UI_INPUT: Provided character profile:\n{profile}")
+    
+    context.user_data['user_profile'] = profile
+    # --- MODIFICATION END ---
 
     if NSFW_MODULE_AVAILABLE:
         buttons = [[
@@ -69,6 +89,11 @@ async def receive_profile_for_setup(update: Update, context: ContextTypes.DEFAUL
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Generic cancel command to exit any conversation state."""
+    if config.LOG_USER_COMMANDS:
+        user = update.effective_user
+        user_logger = logging_utils.get_user_logger(user.id, user.username)
+        user_logger.info(f"COMMAND: /cancel")
+
     await update.message.reply_text("Operation cancelled.")
     return ConversationHandler.END
 
@@ -76,7 +101,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 def get_entry_points():
     """Returns the entry points for the conversation."""
-    from .hub import setup_hub_command # Local import to avoid circular dependency
+    from .hub import setup_hub_command
     return [
         CommandHandler("start", start_command),
         CommandHandler("setup", setup_hub_command),
@@ -85,18 +110,15 @@ def get_entry_points():
 def get_fallbacks():
     """Returns the fallbacks for the conversation."""
     from .hub import setup_hub_command
-    # --- FIX: Import persona_menu to be used in the fallback ---
     from .persona import persona_menu
     return [
         CallbackQueryHandler(setup_hub_command, pattern="^hub_back$"),
-        # --- FIX: Add a callback query handler for the "back to persona" button ---
         CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
         CommandHandler("cancel", cancel_command)
     ]
 
 def get_states():
     """Returns the state handlers managed by this module."""
-    # Local import here because nsfw module might not exist, handled by NSFW_MODULE_AVAILABLE
     if NSFW_MODULE_AVAILABLE:
         from src.handlers.nsfw import nsfw_onboarding_handler
     

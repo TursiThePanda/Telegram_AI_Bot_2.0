@@ -49,7 +49,9 @@ STREAM_UPDATE_INTERVAL = 1.5
 USER_RATE_LIMIT = 1.0
 PERFORMANCE_REPORTING_ENABLED = os.getenv("PERFORMANCE_REPORTING_ENABLED", "0") == "1"
 # --- User chat logging ---
-USER_LOGGING_ENABLED = os.getenv("USER_LOGGING_ENABLED", "0") == "1"
+LOG_USER_CHAT_MESSAGES = os.getenv("LOG_USER_CHAT_MESSAGES", "0") == "1"
+LOG_USER_COMMANDS = os.getenv("LOG_USER_COMMANDS", "0") == "1"
+LOG_USER_UI_INTERACTIONS = os.getenv("LOG_USER_UI_INTERACTIONS", "0") == "1"
 
 
 # --- Debugging Configuration ---

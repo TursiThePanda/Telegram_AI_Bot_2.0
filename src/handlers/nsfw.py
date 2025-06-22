@@ -39,7 +39,7 @@ NSFW_RATELIMIT_LOCK = asyncio.Lock() # Add a lock for thread-safe access to NSFW
 
 # --- Helper Functions ---
 def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Builds the prompt for the AI to generate an NSFW persona using a simple delimiter."""
+    """Builds the prompt for the AI to generate an NSFW persona."""
     species = context.chat_data.get('nsfw_gen_species', 'any')
     gender = context.chat_data.get('nsfw_gen_gender', 'any')
     role = context.chat_data.get('nsfw_gen_role', 'any')
@@ -55,12 +55,11 @@ def _build_nsfw_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
     
     prompt_parts.extend([
         "The persona prompt must be very detailed, describing their personality, background, appearance, and how they should interact with the user in an erotic or dominant/submissive manner.",
-        # --- MODIFICATION START: New simpler format instruction ---
-        "Your response MUST follow this format exactly:",
-        "Line 1: The character's name.",
-        "Line 2: The exact delimiter string '###-###-###'.",
-        "Line 3 onwards: The full, multi-paragraph system prompt for the persona."
-        # --- MODIFICATION END ---
+        "Your response MUST be formatted as follows:",
+        "The first line must contain ONLY the character's name.",
+        "The second line must be the exact delimiter string '###-###-###'.",
+        "All subsequent lines will be the character's detailed system prompt.",
+        "The generated system prompt MUST end with the following rule on a new line: 'RULES: You must not speak, act, or make decisions for the user's character. You will only control your own character's actions and dialogue.'"
     ])
     return "\n".join(prompt_parts)
 
@@ -168,51 +167,49 @@ async def handle_fetish_selection(update: Update, context: ContextTypes.DEFAULT_
     return config.NSFW_GEN_FETISHES
 
 async def generate_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Generates and confirms an NSFW persona using delimiter parsing."""
-    logger.debug("Entering generate_and_confirm function.")
+    """Generates and confirms an NSFW persona using newline parsing."""
+    logger.debug("Entering generate_and_confirm function.") #
     
-    query = update.callback_query
-    if query: 
-        await query.answer()
+    query = update.callback_query #
+    if query:  #
+        await query.answer() #
 
-    message_to_edit = query.message
-    await message_to_edit.edit_text("⏳ Generating NSFW persona...")
+    message_to_edit = query.message #
+    await message_to_edit.edit_text("⏳ Generating NSFW persona...") #
 
-    prompt = _build_nsfw_prompt(context)
+    prompt = _build_nsfw_prompt(context) #
     try:
-        generated_str = await ai_service.get_generation(prompt, task_type="creative")
+        generated_str = await ai_service.get_generation(prompt, task_type="creative") #
         
-        # --- MODIFICATION START: Replace JSON parsing with simple, robust delimiter parsing ---
+        # --- MODIFICATION START: Replace delimiter parsing with simpler newline parsing ---
         try:
-            parts = generated_str.split('###-###-###', 1)
-            if len(parts) != 2:
-                raise ValueError("Delimiter '###-###-###' not found in AI output.")
+            # Split the response into a name and prompt based on the first newline
+            lines = generated_str.strip().split('\n', 1)
+            if len(lines) < 2 or not lines[0].strip() or not lines[1].strip():
+                raise ValueError("AI output could not be split into a name and a prompt.")
             
-            name = parts[0].strip()
-            prompt_text = parts[1].strip()
-
-            if not name or not prompt_text:
-                 raise ValueError("Parsed name or prompt is empty.")
+            name = lines[0].strip()
+            prompt_text = lines[1].strip()
 
         except (ValueError, IndexError) as e:
-            logger.error(f"Failed to parse delimiter format from AI response. Error: {e}. Full output: {generated_str}")
-            raise ValueError(f"Could not parse AI output. The model did not use the correct delimiter format.")
+            logger.error(f"Failed to parse name/prompt format from AI response. Error: {e}. Full output: {generated_str}")
+            raise ValueError("Could not parse AI output. The model did not use the correct name/prompt format.")
         # --- MODIFICATION END ---
 
-        context.chat_data['generated_persona'] = {"name": name, "prompt": prompt_text, "category": "nsfw"}
+        context.chat_data['generated_persona'] = {"name": name, "prompt": prompt_text, "category": "nsfw"} #
         
-        text = f"<b>Generated NSFW Persona:</b>\n\n<b>Name:</b> {html.escape(name)}\n\n<b>Prompt:</b>\n<code>{html.escape(prompt_text)}</code>"
-        buttons = [
+        text = f"<b>Generated NSFW Persona:</b>\n\n<b>Name:</b> {html.escape(name)}\n\n<b>Prompt:</b>\n<code>{html.escape(prompt_text)}</code>" #
+        buttons = [ #
             [InlineKeyboardButton("✅ Use This Persona", callback_data="persona_use_generated")],
             [InlineKeyboardButton("🔄 Regenerate", callback_data="hub_persona_surprise_nsfw")],
             [InlineKeyboardButton("« Cancel", callback_data="persona_menu_back")]
         ]
-        await message_to_edit.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
-        return config.NSFW_GEN_CONFIRM
-    except Exception as e:
-        logger.error(f"Failed to generate NSFW persona: {e}", exc_info=True)
+        await message_to_edit.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML) #
+        return config.NSFW_GEN_CONFIRM #
+    except Exception as e: #
+        logger.error(f"Failed to generate NSFW persona: {e}", exc_info=True) #
         await message_to_edit.edit_text(f"Sorry, the AI failed to generate a persona. Error: {html.escape(str(e))}")
-        return ConversationHandler.END 
+        return ConversationHandler.END #
 
 # --- Exported Functions for the Assembler ---
 def get_states():
