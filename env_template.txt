@@ -1,12 +1,13 @@
 # .env
 
 # --- Core Bot Credentials (Required) ---
+
 TELEGRAM_BOT_TOKEN=
 BOT_OWNER_ID=
 TELEGRAM_BOT_USERNAME=
 
 # --- AI Model Server Configuration (Required) ---
-LM_STUDIO_API_BASE=
+LM_STUDIO_API_BASE=http://localhost:1234
 
 # --- AI Model Specification ---
 # You can use the same model for each one.
@@ -20,4 +21,8 @@ LM_STUDIO_CREATIVE_MODEL=
 VECTOR_MEMORY_ENABLED=1
 DEBUG_LOGGING=0
 PERFORMANCE_REPORTING_ENABLED=0
-USER_LOGGING_ENABLED=1
+
+# --- Granular User Logging Toggles (1 to enable, 0 to disable) ---
+LOG_USER_CHAT_MESSAGES=0
+LOG_USER_COMMANDS=0
+LOG_USER_UI_INTERACTIONS=0
