@@ -20,6 +20,8 @@ from src.utils import logging as logging_utils
 logger = logging.getLogger(__name__)
 NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
 
+# --- PROMPT BUILDERS ---
+
 def _build_sfw_persona_prompt() -> str:
     """Builds the prompt for the AI to generate a random persona."""
     return (
@@ -29,9 +31,9 @@ def _build_sfw_persona_prompt() -> str:
         "All subsequent lines will be the character's detailed system prompt."
     )
 
+# --- MODIFIED: The prompt no longer asks for a delimiter ---
 def _build_opposite_persona_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Builds a structured prompt for the AI to generate a 'perfect partner' persona."""
-    # NEW: Use structured data from user_data
     user_profile = context.user_data.get('user_profile', 'Not specified.')
     user_gender = context.user_data.get('user_gender', 'Not specified.')
     user_role = context.user_data.get('user_role', 'Not specified.')
@@ -51,12 +53,13 @@ def _build_opposite_persona_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
         "---------------------------------\n\n"
         "Format your response exactly as follows, with no other text:\n"
         "Line 1: The new character's name.\n"
-        "Line 2: The delimiter '###-###-###'.\n"
-        "Line 3 onwards: The full system prompt for the new persona."
+        "Line 2 onwards: The full system prompt for the new persona."
     )
 
+# --- MENU & ACTION FUNCTIONS ---
+
 async def persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (this function remains the same)
+    """Displays the main persona selection menu."""
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Entered Persona Menu. Callback: {update.callback_query.data}")
@@ -97,9 +100,8 @@ async def persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
     return config.PERSONA_MENU
 
-
 async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (this function remains the same)
+    """Generates a new SFW persona by parsing the first line as the name."""
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Pressed button with data '{update.callback_query.data}'")
@@ -140,7 +142,7 @@ async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYP
         
     return config.PERSONA_MENU
 
-
+# --- MODIFIED: The parsing logic now splits on the first newline ---
 async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Generates a persona that is the opposite of the user's profile."""
     if config.LOG_USER_UI_INTERACTIONS:
@@ -149,8 +151,7 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
 
     query = update.callback_query
     await query.answer()
-    
-    # Check if structured data exists
+
     if not all(k in context.user_data for k in ('user_profile', 'user_gender', 'user_role')):
         await query.edit_message_text(
             "You need to set your full profile first (including gender and role) before an 'opposite' can be generated.\n"
@@ -162,7 +163,6 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
 
     await query.edit_message_text("Generating a complementary 'opposite' persona based on your profile...")
     
-    # UPDATED: Pass the whole context to the builder function
     prompt = _build_opposite_persona_prompt(context)
     
     if config.LOG_USER_UI_INTERACTIONS:
@@ -173,13 +173,16 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
         generated_str = await ai_service.get_generation(prompt, task_type="creative")
         
         try:
-            parts = generated_str.split('###-###-###', 1)
-            if len(parts) != 2: raise ValueError("Delimiter '###-###-###' not found in AI output.")
+            # New, more robust parsing logic
+            parts = generated_str.strip().split('\n', 1)
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError("AI output could not be split into a name and a prompt.")
+            
             name_part, prompt_part = parts[0].strip(), parts[1].strip()
-            if not name_part or not prompt_part: raise ValueError("Parsed name or prompt is empty.")
+
         except (ValueError, IndexError) as e:
-            logger.error(f"Failed to parse delimiter format from AI response. Error: {e}. Full output: {generated_str}")
-            raise ValueError("Could not parse AI output. The model did not use the correct delimiter format.")
+            logger.error(f"Failed to parse name/prompt format from AI response. Error: {e}. Full output: {generated_str}")
+            raise ValueError("Could not parse AI output. The model did not provide a name and a prompt on separate lines.")
 
         context.chat_data['generated_persona'] = {"name": name_part, "prompt": prompt_part, "category": "custom"}
         
@@ -198,7 +201,7 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
     return config.PERSONA_MENU
 
 async def receive_persona_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (this function remains the same)
+    """Saves the chosen persona and returns to the setup hub."""
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Selected persona with data '{update.callback_query.data}'")
@@ -219,7 +222,6 @@ async def receive_persona_choice(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("❌ Error: Persona not found.")
         return await persona_menu(update, context)
 
-
 async def prompt_custom_persona_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Asks the user for the name of their new persona."""
     if config.LOG_USER_UI_INTERACTIONS:
@@ -228,7 +230,6 @@ async def prompt_custom_persona_name(update: Update, context: ContextTypes.DEFAU
 
     query = update.callback_query
     await query.answer()
-    # NEW: Added "Back" button
     buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
     markup = InlineKeyboardMarkup(buttons)
     await query.edit_message_text("What is the name of your new custom persona?", reply_markup=markup)
@@ -241,7 +242,6 @@ async def prompt_custom_persona_prompt(update: Update, context: ContextTypes.DEF
         user_logger.info(f"UI_INPUT: Provided custom persona name.")
 
     context.user_data['new_persona_name'] = update.message.text.strip()
-    # NEW: Added "Back" button
     buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
     markup = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(
@@ -251,7 +251,7 @@ async def prompt_custom_persona_prompt(update: Update, context: ContextTypes.DEF
     return config.CUSTOM_PERSONA_PROMPT
 
 async def save_custom_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (this function remains the same)
+    """Saves the completed custom persona and returns to the setup hub."""
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INPUT: Provided custom persona prompt.")
@@ -268,9 +268,8 @@ async def save_custom_persona(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(f"✅ Custom persona '<b>{name}</b>' created and is now active!", parse_mode=ParseMode.HTML)
     return await setup_hub_command(update, context)
 
-
 async def use_generated_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # ... (this function remains the same)
+    """Applies the generated persona and returns to the setup hub."""
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Pressed button with data '{update.callback_query.data}'")
@@ -292,7 +291,6 @@ async def use_generated_persona(update: Update, context: ContextTypes.DEFAULT_TY
     return await setup_hub_command(update, context)
 
 
-
 def get_states():
     """Returns the state handlers for the persona module."""
     return {
@@ -304,14 +302,6 @@ def get_states():
             CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$"),
             CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
         ],
-        config.CUSTOM_PERSONA_NAME: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, prompt_custom_persona_prompt),
-            # NEW: Handle "Back" button press during name input
-            CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
-        ],
-        config.CUSTOM_PERSONA_PROMPT: [
-            MessageHandler(filters.TEXT & ~filters.COMMAND, save_custom_persona),
-            # NEW: Handle "Back" button press during prompt input
-            CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
-        ],
+        config.CUSTOM_PERSONA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, prompt_custom_persona_prompt)],
+        config.CUSTOM_PERSONA_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_custom_persona)],
     }

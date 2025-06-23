@@ -205,7 +205,6 @@ async def add_summary_to_db(chat_id: int, summary_text: str):
         except Exception as e:
             logger.error(f"Failed to add summary vector embedding for chat {chat_id}: {e}", exc_info=True)
 
-# --- MODIFIED: Now returns message IDs needed for pruning ---
 async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, Any]]:
     """Retrieves conversation history from SQLite, including message IDs."""
     async with get_db_connection() as con:
@@ -216,17 +215,14 @@ async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, A
         rows.reverse()
         return [{"id": row["id"], "role": row["role"], "content": row["content"]} for row in rows]
 
-# --- NEW: Function to retrieve only summaries for the /memory command ---
 async def get_summaries_from_db(chat_id: int, limit: int = 5) -> List[str]:
     """Retrieves the most recent summaries for a given chat."""
     async with get_db_connection() as con:
         query = "SELECT content FROM conversations WHERE chat_id = ? AND role = 'system' AND content LIKE 'Memory Summary:%' ORDER BY timestamp DESC LIMIT ?"
         cursor = await asyncio.to_thread(con.execute, query, (chat_id, limit))
         rows = await asyncio.to_thread(cursor.fetchall)
-        # Strip the prefix for display
         return [row[0].replace("Memory Summary: ", "") for row in rows]
 
-# --- NEW: Function to delete messages by ID for pruning ---
 async def delete_messages_by_ids(ids_to_delete: List[int]):
     """Deletes messages from SQLite and ChromaDB by their IDs."""
     if not ids_to_delete:
@@ -239,14 +235,13 @@ async def delete_messages_by_ids(ids_to_delete: List[int]):
 
     if config.VECTOR_MEMORY_ENABLED and memory_collection:
         try:
-            # ChromaDB IDs are stored as strings
             string_ids = [str(id_val) for id_val in ids_to_delete]
             await asyncio.to_thread(memory_collection.delete, ids=string_ids)
             logger.info(f"Pruned {len(string_ids)} messages from vector memory.")
         except Exception as e:
             logger.error(f"Failed to prune vector embeddings for IDs {string_ids}: {e}", exc_info=True)
 
-# --- REWRITTEN: Implements Hybrid Search to prioritize summaries ---
+# --- REWRITTEN: Implements Hybrid Search with correct ChromaDB filter syntax ---
 async def search_semantic_memory(chat_id: int, query_text: str) -> List[str]:
     """
     Performs a hybrid semantic search, prioritizing one summary and then recent messages.
@@ -262,15 +257,28 @@ async def search_semantic_memory(chat_id: int, query_text: str) -> List[str]:
             memory_collection.query,
             query_embeddings=[query_embedding[0].tolist()],
             n_results=1,
-            where={"chat_id": chat_id, "type": "summary"}
+            where={
+                "$and": [
+                    {"chat_id": {"$eq": chat_id}},
+                    {"type": {"$eq": "summary"}}
+                ]
+            }
         )
         
         # 2. Search for the N-1 most relevant individual messages
+        # Note: SEMANTIC_SEARCH_K_RESULTS is the *total* desired memories.
+        num_messages_to_fetch = max(1, config.SEMANTIC_SEARCH_K_RESULTS - 1)
         message_results = await asyncio.to_thread(
             memory_collection.query,
             query_embeddings=[query_embedding[0].tolist()],
-            n_results=config.SEMANTIC_SEARCH_K_RESULTS - 1,
-            where={"chat_id": chat_id, "type": "message"}
+            n_results=num_messages_to_fetch,
+            where={
+                "$and": [
+                    {"chat_id": {"$eq": chat_id}},
+                    # Using "$ne" for "not equal to" to exclude summaries
+                    {"type": {"$ne": "summary"}}
+                ]
+            }
         )
         
         # Combine results, summary first
