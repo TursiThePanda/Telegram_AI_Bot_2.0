@@ -137,6 +137,8 @@ async def get_db_connection():
     finally:
         await db_pool.return_connection(conn)
 
+# --- Core Database Functions ---
+
 async def get_user_timestamp(user_id: int) -> float:
     """Retrieves the last message timestamp for a given user."""
     async with get_db_connection() as con:
@@ -154,7 +156,6 @@ async def update_user_timestamp(user_id: int, timestamp: float):
         )
         await asyncio.to_thread(con.commit)
 
-# --- Core Database Functions ---
 async def add_message_to_db(chat_id: int, role: str, content: str):
     """Adds a message to SQLite and its vector embedding to ChromaDB."""
     db_id = None
@@ -165,27 +166,22 @@ async def add_message_to_db(chat_id: int, role: str, content: str):
         db_id = cursor.lastrowid
         await asyncio.to_thread(con.commit)
 
-    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model:
+    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model and memory_collection:
         try:
             embedding = await asyncio.to_thread(embedding_model.encode, [content])
             await asyncio.to_thread(
                 memory_collection.add,
                 embeddings=[embedding[0].tolist()],
                 documents=[content],
-                metadatas=[{"chat_id": chat_id, "timestamp": time.time()}],
+                metadatas=[{"chat_id": chat_id, "timestamp": time.time(), "type": "message"}],
                 ids=[str(db_id)]
             )
         except Exception as e:
             logger.error(f"Failed to add vector embedding for chat {chat_id} (SQLite ID: {db_id}): {e}", exc_info=True)
 
-# --- NEW: Function to add a summary to the database ---
 async def add_summary_to_db(chat_id: int, summary_text: str):
-    """
-    Adds a conversation summary to the SQLite and vector databases.
-    The summary is stored with the 'system' role to distinguish it.
-    """
+    """Adds a conversation summary to the SQLite and vector databases."""
     db_id = None
-    # The "Memory Summary:" prefix helps identify these entries in the raw DB
     content_with_prefix = f"Memory Summary: {summary_text}"
 
     async with get_db_connection() as con:
@@ -195,69 +191,111 @@ async def add_summary_to_db(chat_id: int, summary_text: str):
         db_id = cursor.lastrowid
         await asyncio.to_thread(con.commit)
 
-    # Add the raw summary text to the vector DB for semantic searching
-    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model:
+    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model and memory_collection:
         try:
             embedding = await asyncio.to_thread(embedding_model.encode, [summary_text])
             await asyncio.to_thread(
                 memory_collection.add,
                 embeddings=[embedding[0].tolist()],
-                documents=[summary_text], # We store the raw summary for searching
-                metadatas=[{"chat_id": chat_id, "timestamp": time.time(), "type": "summary"}], # Add type metadata
+                documents=[summary_text],
+                metadatas=[{"chat_id": chat_id, "timestamp": time.time(), "type": "summary"}],
                 ids=[str(db_id)]
             )
             logger.info(f"Successfully added a new summary to vector memory for chat {chat_id}.")
         except Exception as e:
             logger.error(f"Failed to add summary vector embedding for chat {chat_id}: {e}", exc_info=True)
 
-
-async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, str]]:
-    """Retrieves conversation history from SQLite."""
+# --- MODIFIED: Now returns message IDs needed for pruning ---
+async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+    """Retrieves conversation history from SQLite, including message IDs."""
     async with get_db_connection() as con:
         con.row_factory = sqlite3.Row
-        query = "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?"
+        query = "SELECT id, role, content FROM conversations WHERE chat_id = ? ORDER BY timestamp DESC LIMIT ?"
         cursor = await asyncio.to_thread(con.execute, query, (chat_id, limit))
         rows = await asyncio.to_thread(cursor.fetchall)
         rows.reverse()
-        return [{"role": row["role"], "content": row["content"]} for row in rows]
+        return [{"id": row["id"], "role": row["role"], "content": row["content"]} for row in rows]
 
+# --- NEW: Function to retrieve only summaries for the /memory command ---
+async def get_summaries_from_db(chat_id: int, limit: int = 5) -> List[str]:
+    """Retrieves the most recent summaries for a given chat."""
+    async with get_db_connection() as con:
+        query = "SELECT content FROM conversations WHERE chat_id = ? AND role = 'system' AND content LIKE 'Memory Summary:%' ORDER BY timestamp DESC LIMIT ?"
+        cursor = await asyncio.to_thread(con.execute, query, (chat_id, limit))
+        rows = await asyncio.to_thread(cursor.fetchall)
+        # Strip the prefix for display
+        return [row[0].replace("Memory Summary: ", "") for row in rows]
+
+# --- NEW: Function to delete messages by ID for pruning ---
+async def delete_messages_by_ids(ids_to_delete: List[int]):
+    """Deletes messages from SQLite and ChromaDB by their IDs."""
+    if not ids_to_delete:
+        return
+
+    placeholders = ','.join('?' for _ in ids_to_delete)
+    async with get_db_connection() as con:
+        await asyncio.to_thread(con.execute, f"DELETE FROM conversations WHERE id IN ({placeholders})", ids_to_delete)
+        await asyncio.to_thread(con.commit)
+
+    if config.VECTOR_MEMORY_ENABLED and memory_collection:
+        try:
+            # ChromaDB IDs are stored as strings
+            string_ids = [str(id_val) for id_val in ids_to_delete]
+            await asyncio.to_thread(memory_collection.delete, ids=string_ids)
+            logger.info(f"Pruned {len(string_ids)} messages from vector memory.")
+        except Exception as e:
+            logger.error(f"Failed to prune vector embeddings for IDs {string_ids}: {e}", exc_info=True)
+
+# --- REWRITTEN: Implements Hybrid Search to prioritize summaries ---
 async def search_semantic_memory(chat_id: int, query_text: str) -> List[str]:
-    """Performs a semantic search in ChromaDB for relevant memories."""
+    """
+    Performs a hybrid semantic search, prioritizing one summary and then recent messages.
+    """
     if not config.VECTOR_MEMORY_ENABLED or not memory_collection or not embedding_model:
-        if config.VECTOR_MEMORY_ENABLED:
-            logger.debug("Vector memory is enabled in config, but ChromaDB/embedding model is not initialized.")
         return []
+
     try:
         query_embedding = await asyncio.to_thread(embedding_model.encode, [query_text])
-        results = await asyncio.to_thread(
+        
+        # 1. Search for the single most relevant summary
+        summary_results = await asyncio.to_thread(
             memory_collection.query,
             query_embeddings=[query_embedding[0].tolist()],
-            n_results=config.SEMANTIC_SEARCH_K_RESULTS,
-            where={"chat_id": chat_id}
+            n_results=1,
+            where={"chat_id": chat_id, "type": "summary"}
         )
-        return results.get('documents', [[]])[0]
+        
+        # 2. Search for the N-1 most relevant individual messages
+        message_results = await asyncio.to_thread(
+            memory_collection.query,
+            query_embeddings=[query_embedding[0].tolist()],
+            n_results=config.SEMANTIC_SEARCH_K_RESULTS - 1,
+            where={"chat_id": chat_id, "type": "message"}
+        )
+        
+        # Combine results, summary first
+        final_memories = []
+        if summary_results and summary_results.get('documents', [[]])[0]:
+            final_memories.extend(summary_results['documents'][0])
+        
+        if message_results and message_results.get('documents', [[]])[0]:
+            final_memories.extend(message_results['documents'][0])
+            
+        return final_memories
+
     except Exception as e:
-        logger.error(f"Semantic memory search failed for chat {chat_id}: {e}", exc_info=True)
+        logger.error(f"Hybrid semantic memory search failed for chat {chat_id}: {e}", exc_info=True)
         return []
 
 async def delete_last_interaction(chat_id: int):
     """Deletes the last user/assistant pair from the databases."""
-    ids_to_delete = []
     async with get_db_connection() as con:
         cursor = await asyncio.to_thread(con.execute, "SELECT id FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 2", (chat_id,))
         rows = await asyncio.to_thread(cursor.fetchall)
-        if not rows: return
+    
+    if rows:
         ids_to_delete = [row[0] for row in rows]
-        placeholders = ','.join('?' for _ in ids_to_delete)
-        await asyncio.to_thread(con.execute, f"DELETE FROM conversations WHERE id IN ({placeholders})", ids_to_delete)
-        await asyncio.to_thread(con.commit)
-
-    if config.VECTOR_MEMORY_ENABLED and memory_collection and ids_to_delete:
-        try:
-            await asyncio.to_thread(memory_collection.delete, ids=[str(id_val) for id_val in ids_to_delete])
-        except Exception as e:
-            logger.error(f"Failed to delete vector embeddings for chat {chat_id}, IDs {ids_to_delete}: {e}", exc_info=True)
-
+        await delete_messages_by_ids(ids_to_delete)
 
 async def clear_history(chat_id: int):
     """Deletes all data for a user from the databases."""
