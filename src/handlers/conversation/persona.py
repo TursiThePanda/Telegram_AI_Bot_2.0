@@ -20,44 +20,43 @@ from src.utils import logging as logging_utils
 logger = logging.getLogger(__name__)
 NSFW_MODULE_AVAILABLE = module_loader.is_module_available("src.handlers.nsfw")
 
-# --- PROMPT BUILDERS ---
-
 def _build_sfw_persona_prompt() -> str:
     """Builds the prompt for the AI to generate a random persona."""
     return (
         "Generate a simple, safe-for-work fantasy character persona. "
         "Your response MUST be formatted as follows:\n"
         "The first line must contain ONLY the character's name.\n"
-        "The second line must be the exact delimiter string '###-###-###'.\n"
-        "The subsequent lines must be the character's detailed system prompt.\n"
-        "The generated system prompt MUST end with the following rule on a new line: "
-        "RULES: You must not speak, act, or make decisions for the user's character. You will only control your own character's actions and dialogue."
+        "All subsequent lines will be the character's detailed system prompt."
     )
 
-def _build_opposite_persona_prompt(user_profile: str) -> str:
-    """Builds the prompt for the AI to generate a 'perfect partner' persona with forceful instructions."""
+def _build_opposite_persona_prompt(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Builds a structured prompt for the AI to generate a 'perfect partner' persona."""
+    # NEW: Use structured data from user_data
+    user_profile = context.user_data.get('user_profile', 'Not specified.')
+    user_gender = context.user_data.get('user_gender', 'Not specified.')
+    user_role = context.user_data.get('user_role', 'Not specified.')
+
     return (
-        "Your task is to create an ideal, compatible, and complementary role-playing partner for the user, based on their profile below. "
+        "Your task is to create an ideal, compatible, and complementary role-playing partner for the user, based on their structured profile below. "
         "Follow these strict rules:\n"
-        "1.  **Opposing Role (HIGHEST PRIORITY):** Your most important task is to create a persona with the OPPOSITE sexual role. If the user's profile says they are SUBMISSIVE, you MUST create a DOMINANT persona. If the user is DOMINANT, you MUST create a SUBMISSIVE one. This is a strict rule.\n"
-        "2.  **Species and Theme Compatibility:** Identify the user's character's species or theme (e.g., human, furry). The new persona **must belong to the same general theme**.\n"
-        "3.  **Sexual Compatibility:** The new persona's gender **must be sexually compatible** with the user's profile (e.g., if the user is a gay male, create a male persona).\n"
-        "4.  **Shared Core Interests:** Identify all the specific kinks and fetishes mentioned in the user's profile. The new persona you create MUST **share and enthusiastically enjoy all of these same fetishes**. While the kinks are shared, the persona's *approach* to them should reflect their new, opposite role.\n"
-        "5.  **Introduce New Things (With Consent):** Give the new persona **one to three additional, related fetishes** that are not in the user's profile but would logically complement the existing ones. The persona's description must include a rule that they will always seek enthusiastic consent before introducing any new kinks.\n"
-        "6.  **Behavioral Rule:** The generated system prompt MUST end with the following rule on a new line: 'RULES: You must not speak, act, or make decisions for the user's character. You will only control your own character's actions and dialogue.'\n"
-        "\n--- User's Character Description ---\n"
-        f"{user_profile}"
-        "\n---------------------------------\n\n"
+        "1.  **Analyze User Profile:** The user's full profile description is provided for context on their species, personality, and kinks. The new persona MUST be compatible with this.\n"
+        "2.  **Opposing Role & Personality:** The user's primary role is '{user_role}'. You MUST create a persona with a complementary opposing role (e.g., if user is Dominant, create a Submissive; if Switch, can be anything).\n"
+        "3.  **Sexual Compatibility:** The user's gender is '{user_gender}'. The new persona's gender MUST be sexually compatible.\n"
+        "4.  **Shared Core Interests:** The new persona you create MUST share and enthusiastically enjoy all kinks/fetishes mentioned in the user's profile text.\n"
+        "5.  **Behavioral Rule:** The generated system prompt MUST end with the following rule on a new line: 'RULES: You must not speak, act, or make decisions for the user's character. You will only control your own character's actions and dialogue.'\n"
+        "\n--- User's Structured Profile ---\n"
+        f"GENDER: {user_gender}\n"
+        f"ROLE: {user_role}\n"
+        f"FULL PROFILE: {user_profile}\n"
+        "---------------------------------\n\n"
         "Format your response exactly as follows, with no other text:\n"
         "Line 1: The new character's name.\n"
         "Line 2: The delimiter '###-###-###'.\n"
         "Line 3 onwards: The full system prompt for the new persona."
     )
 
-# --- MENU & ACTION FUNCTIONS ---
-
 async def persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Displays the main persona selection menu."""
+    # ... (this function remains the same)
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Entered Persona Menu. Callback: {update.callback_query.data}")
@@ -92,14 +91,15 @@ async def persona_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         "<b>🤖 Select an AI Persona</b>\n\n"
         "Choose a pre-defined persona, create your own, or use the AI to generate a new one.\n\n"
         "<i>✨ Generate Random: Creates a new, completely random character.</i>\n"
-        "<i>↔️ Generate Opposite: Analyzes your profile to create a complementary character (e.g., dominant if you are submissive).</i>"
+        "<i>↔️ Generate Opposite: Analyzes your profile to create a complementary character.</i>"
     )
 
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
     return config.PERSONA_MENU
 
+
 async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Generates a new SFW persona by parsing a delimiter-based response from the AI."""
+    # ... (this function remains the same)
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Pressed button with data '{update.callback_query.data}'")
@@ -140,6 +140,7 @@ async def surprise_persona_sfw(update: Update, context: ContextTypes.DEFAULT_TYP
         
     return config.PERSONA_MENU
 
+
 async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Generates a persona that is the opposite of the user's profile."""
     if config.LOG_USER_UI_INTERACTIONS:
@@ -148,16 +149,21 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
 
     query = update.callback_query
     await query.answer()
-
-    user_profile = context.user_data.get('user_profile')
-    if not user_profile:
-        await query.edit_message_text("You need to set your own profile first before an 'opposite' can be generated.\nUse `/setup -> Edit Name/Profile` to set one.", parse_mode=ParseMode.HTML)
+    
+    # Check if structured data exists
+    if not all(k in context.user_data for k in ('user_profile', 'user_gender', 'user_role')):
+        await query.edit_message_text(
+            "You need to set your full profile first (including gender and role) before an 'opposite' can be generated.\n"
+            "Use `/setup -> Edit Name/Profile` to set them.",
+            parse_mode=ParseMode.HTML
+        )
         await asyncio.sleep(4)
         return await persona_menu(update, context)
 
     await query.edit_message_text("Generating a complementary 'opposite' persona based on your profile...")
     
-    prompt = _build_opposite_persona_prompt(user_profile)
+    # UPDATED: Pass the whole context to the builder function
+    prompt = _build_opposite_persona_prompt(context)
     
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
@@ -178,7 +184,11 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
         context.chat_data['generated_persona'] = {"name": name_part, "prompt": prompt_part, "category": "custom"}
         
         text = f"<b>Generated Opposite Persona:</b>\n\n<b>Name:</b> {html.escape(name_part)}\n\n<b>Prompt:</b>\n<code>{html.escape(prompt_part)}</code>"
-        buttons = [[InlineKeyboardButton("✅ Use This Persona", callback_data="persona_use_generated")], [InlineKeyboardButton("« Back", callback_data="persona_menu_back")]]
+        buttons = [
+            [InlineKeyboardButton("✅ Use This Persona", callback_data="persona_use_generated")],
+            [InlineKeyboardButton("🔄 Regenerate", callback_data="persona_generate_opposite")],
+            [InlineKeyboardButton("« Back", callback_data="persona_menu_back")]
+        ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML)
         
     except Exception as e:
@@ -188,7 +198,7 @@ async def generate_opposite_persona(update: Update, context: ContextTypes.DEFAUL
     return config.PERSONA_MENU
 
 async def receive_persona_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Saves the chosen persona and returns to the setup hub."""
+    # ... (this function remains the same)
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Selected persona with data '{update.callback_query.data}'")
@@ -209,6 +219,7 @@ async def receive_persona_choice(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("❌ Error: Persona not found.")
         return await persona_menu(update, context)
 
+
 async def prompt_custom_persona_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Asks the user for the name of their new persona."""
     if config.LOG_USER_UI_INTERACTIONS:
@@ -217,6 +228,7 @@ async def prompt_custom_persona_name(update: Update, context: ContextTypes.DEFAU
 
     query = update.callback_query
     await query.answer()
+    # NEW: Added "Back" button
     buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
     markup = InlineKeyboardMarkup(buttons)
     await query.edit_message_text("What is the name of your new custom persona?", reply_markup=markup)
@@ -229,6 +241,7 @@ async def prompt_custom_persona_prompt(update: Update, context: ContextTypes.DEF
         user_logger.info(f"UI_INPUT: Provided custom persona name.")
 
     context.user_data['new_persona_name'] = update.message.text.strip()
+    # NEW: Added "Back" button
     buttons = [[InlineKeyboardButton("« Back to Persona Menu", callback_data="persona_menu_back")]]
     markup = InlineKeyboardMarkup(buttons)
     await update.message.reply_text(
@@ -238,7 +251,7 @@ async def prompt_custom_persona_prompt(update: Update, context: ContextTypes.DEF
     return config.CUSTOM_PERSONA_PROMPT
 
 async def save_custom_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Saves the completed custom persona and returns to the setup hub."""
+    # ... (this function remains the same)
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INPUT: Provided custom persona prompt.")
@@ -255,8 +268,9 @@ async def save_custom_persona(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(f"✅ Custom persona '<b>{name}</b>' created and is now active!", parse_mode=ParseMode.HTML)
     return await setup_hub_command(update, context)
 
+
 async def use_generated_persona(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Applies the generated persona and returns to the setup hub."""
+    # ... (this function remains the same)
     if config.LOG_USER_UI_INTERACTIONS:
         user_logger = logging_utils.get_user_logger(update.effective_user.id, update.effective_user.username)
         user_logger.info(f"UI_INTERACTION: Pressed button with data '{update.callback_query.data}'")
@@ -278,6 +292,7 @@ async def use_generated_persona(update: Update, context: ContextTypes.DEFAULT_TY
     return await setup_hub_command(update, context)
 
 
+
 def get_states():
     """Returns the state handlers for the persona module."""
     return {
@@ -289,6 +304,14 @@ def get_states():
             CallbackQueryHandler(use_generated_persona, pattern="^persona_use_generated$"),
             CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
         ],
-        config.CUSTOM_PERSONA_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, prompt_custom_persona_prompt)],
-        config.CUSTOM_PERSONA_PROMPT: [MessageHandler(filters.TEXT & ~filters.COMMAND, save_custom_persona)],
+        config.CUSTOM_PERSONA_NAME: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, prompt_custom_persona_prompt),
+            # NEW: Handle "Back" button press during name input
+            CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
+        ],
+        config.CUSTOM_PERSONA_PROMPT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, save_custom_persona),
+            # NEW: Handle "Back" button press during prompt input
+            CallbackQueryHandler(persona_menu, pattern="^persona_menu_back$"),
+        ],
     }

@@ -6,6 +6,9 @@ import logging
 import time
 import html
 import asyncio
+import re
+import tiktoken
+
 from telegram import Update, Message
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.constants import ChatAction, ParseMode
@@ -19,16 +22,50 @@ from src.utils import logging as logging_utils
 
 logger = logging.getLogger(__name__)
 
+def count_message_tokens(messages: list[dict], model: str = "gpt-3.5-turbo") -> int:
+    """Returns the number of tokens used by a list of messages."""
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    except KeyError:
+        encoding = tiktoken.get_encoding("p50k_base")
+
+    num_tokens = 0
+    for message in messages:
+        num_tokens += 4
+        for key, value in message.items():
+            num_tokens += len(encoding.encode(value))
+            if key == "name":
+                num_tokens -= 1
+    num_tokens += 2
+    return num_tokens
+
 async def build_chat_context(context: ContextTypes.DEFAULT_TYPE, user_text: str) -> list:
-    """Constructs the message list for the AI."""
-    # This now correctly gets the chat_id from chat_data, which is set by the /start command
+    """
+    Constructs the message list for the AI, ensuring it fits within the token limit.
+    """
     chat_id = context.chat_data.get('chat_id', context.user_data.get('user_id'))
     
     persona_prompt = context.chat_data.get('persona_prompt', "You are a helpful AI assistant.")
     user_name = context.user_data.get('user_display_name', 'user')
     user_profile = context.user_data.get('user_profile', 'not specified')
     
-    system_prompt = f"{persona_prompt}\nUser's name: {user_name}\nUser's profile: {user_profile}"
+    base_system_rules = (
+        "You are an engaging and descriptive role-playing companion. Your goal is to facilitate an interactive story. "
+        "When it is your turn, you will describe the scene, the actions of non-player characters, and any dialogue they speak. "
+        "You MUST complete your narrative beat for your turn before ending. "
+        "If you issue a command or ask a question directly to the user's character, you *must* end your response there. "
+        "Do not describe the user's character's response or assume their actions, thoughts, or feelings. "
+        f"You must always explicitly ask the user 'What does {user_name} do?' or 'How does {user_name} respond?' at the end of your turn, or a similar direct question prompting their next action. "
+        "Wait for the user's input before continuing the narrative. Your responses should be concise and focused on setting up the next player turn."
+    )
+    system_prompt = (
+        f"{persona_prompt}\n\n"
+        f"{base_system_rules}\n\n"
+        f"Context for the AI:\n"
+        f"The user's character name is: {user_name}\n"
+        f"The user's character profile: {user_profile}"
+    )
+    
     messages = [{"role": "system", "content": system_prompt}]
 
     if config.VECTOR_MEMORY_ENABLED:
@@ -37,13 +74,66 @@ async def build_chat_context(context: ContextTypes.DEFAULT_TYPE, user_text: str)
             memory_prompt = "Relevant past events:\n- " + "\n- ".join(relevant_memories)
             messages.append({"role": "system", "content": memory_prompt})
 
-    history = await db_service.get_history_from_db(chat_id)
-    messages.extend(history)
+    current_tokens = count_message_tokens(messages)
+    history = await db_service.get_history_from_db(chat_id, limit=50)
+    
+    final_history = []
+    for message in reversed(history):
+        message_tokens = count_message_tokens([message])
+        if current_tokens + message_tokens < config.MAX_PROMPT_TOKENS:
+            final_history.insert(0, message)
+            current_tokens += message_tokens
+        else:
+            logger.debug(f"Token limit reached. Truncating conversation history for chat {chat_id}.")
+            break
+            
+    messages.extend(final_history)
+    
+    logger.debug(f"Final prompt for chat {chat_id} has {len(messages)} messages and {current_tokens} tokens.")
     return messages
 
 def sanitize_html(text):
     """Escapes HTML special characters to prevent formatting errors."""
     return html.escape(text, quote=False)
+
+# --- NEW: The summarization background task ---
+async def _run_summarization_task(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """
+    A background task that generates and stores a summary of the recent conversation.
+    """
+    logger.info(f"Starting summarization task for chat {chat_id}...")
+    
+    # Use a lock in chat_data to prevent multiple summaries from running at once for the same user
+    if context.chat_data.get('is_summarizing', False):
+        logger.warning(f"Summarization task for chat {chat_id} already in progress. Skipping.")
+        return
+
+    try:
+        context.chat_data['is_summarizing'] = True
+        
+        # Fetch the last N messages to be summarized
+        messages_to_summarize = await db_service.get_history_from_db(chat_id, limit=config.SUMMARY_THRESHOLD)
+
+        if len(messages_to_summarize) < config.SUMMARY_THRESHOLD:
+            logger.info(f"Not enough history to summarize for chat {chat_id}. Need {config.SUMMARY_THRESHOLD}, have {len(messages_to_summarize)}.")
+            return
+            
+        # Call the AI to generate the summary
+        summary = await ai_service.get_summary(messages_to_summarize)
+        
+        if summary:
+            # Store the new summary in the database
+            await db_service.add_summary_to_db(chat_id, summary)
+            # Reset the counter after a successful summary
+            context.chat_data['messages_since_last_summary'] = 0
+        else:
+            logger.warning(f"AI returned an empty summary for chat {chat_id}.")
+
+    except Exception as e:
+        logger.error(f"Error during background summarization for chat {chat_id}: {e}", exc_info=True)
+    finally:
+        # Always release the lock
+        context.chat_data['is_summarizing'] = False
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The entry point for all user text messages for AI chat."""
@@ -56,20 +146,16 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     user = update.effective_user
     user_text = message.text
+    user_name = context.user_data.get('user_display_name', 'user')
 
     if config.LOG_USER_CHAT_MESSAGES:
         user_logger = logging_utils.get_user_logger(user.id, user.username)
         user_logger.info(f"USER: {user_text}")
 
-    request_id = monitoring_service.performance_monitor.start_request(
-        user_id=user.id,
-        request_type="chat_message"
-    )
+    request_id = monitoring_service.performance_monitor.start_request(user_id=user.id, request_type="chat_message")
     success = False
 
     try:
-        # This is now safe because the /start command ensures user_data is populated
-        # before this handler can be effectively used.
         context.chat_data['chat_id'] = update.effective_chat.id
 
         last_message_time = await db_service.get_user_timestamp(user.id)
@@ -84,14 +170,12 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         placeholder = await message.reply_text("✍️...")
-        
         await context.bot.send_chat_action(chat_id=user.id, action=ChatAction.TYPING)
         
-        # --- FIX: Reverted the function call to use the correct 2 arguments ---
         messages = await build_chat_context(context, user_text)
         messages.append({"role": "user", "content": user_text})
         
-        full_response = ""
+        full_response_raw = ""
         
         if not context.bot_data.get('ai_service_online', True):
             await placeholder.edit_text("❌ The AI service is currently offline. Please try again later.")
@@ -100,43 +184,87 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         streaming_enabled = context.bot_data.get('streaming_enabled', False)
         if streaming_enabled:
-            sanitized_response = ""
+            sanitized_response_buffer = ""
             last_edit_time = time.time()
             response_generator = ai_service.get_chat_response(messages, stream=True)
             async for chunk in response_generator:
-                full_response += chunk
-                sanitized_response += sanitize_html(chunk)
+                full_response_raw += chunk
+                sanitized_response_buffer += sanitize_html(chunk)
+                
                 if time.time() - last_edit_time > config.STREAM_UPDATE_INTERVAL:
+                    display_text = sanitized_response_buffer + " ▋"
+                    if len(display_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
+                        display_text = display_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("... ▋")] + "... ▋"
                     try:
-                        display_text = sanitized_response + " ▋"
-                        if len(display_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
-                            display_text = display_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("... ▋")] + "... ▋"
                         await placeholder.edit_text(display_text, parse_mode=ParseMode.HTML)
                         last_edit_time = time.time()
                     except BadRequest as e:
                         logger.debug(f"BadRequest during message edit for user {user.id}: {e}")
-            final_response_text = sanitized_response
         else:
             response_generator = ai_service.get_chat_response(messages, stream=False)
             async for chunk in response_generator:
-                full_response += chunk
-            final_response_text = sanitize_html(full_response)
+                full_response_raw += chunk
 
-        if not final_response_text or not final_response_text.strip():
+        if not full_response_raw or not full_response_raw.strip():
             logger.warning("Final generated response was empty. Sending an error message to the user.")
             await placeholder.edit_text("😕 The AI model returned an empty response. Please try rephrasing your message or try again later.")
             return
+
+        processed_response = full_response_raw
+        
+        expected_prompt_end = f"What does {user_name} do?"
+        alt_prompt_end = f"How does {user_name} respond?"
+
+        assumed_action_patterns = [
+            re.compile(r"As \w+ complied", re.IGNORECASE), re.compile(r"Tursi complied", re.IGNORECASE),
+            re.compile(r"Tursi obeyed", re.IGNORECASE), re.compile(r"He complied", re.IGNORECASE),
+            re.compile(r"She obeyed", re.IGNORECASE),
+            re.compile(r"(\bhe|\bshe|\bthey|\bTursi) (began to|started to|proceeded to|moved to|reached out to)", re.IGNORECASE),
+        ]
+        
+        explicit_question_found = False
+        if expected_prompt_end in processed_response:
+            processed_response = processed_response.split(expected_prompt_end, 1)[0] + expected_prompt_end
+            explicit_question_found = True
+        elif alt_prompt_end in processed_response:
+            processed_response = processed_response.split(alt_prompt_end, 1)[0] + alt_prompt_end
+            explicit_question_found = True
+        
+        if not explicit_question_found:
+            cutoff_index = len(processed_response)
+            for pattern in assumed_action_patterns:
+                match = pattern.search(processed_response)
+                if match and match.start() < cutoff_index:
+                    cutoff_index = match.start()
+            processed_response = processed_response[:cutoff_index].strip()
+            if not processed_response.strip().endswith(('?', '!', '.')):
+                 processed_response += f" What does {user_name} do?"
+
+        final_response_text = sanitize_html(processed_response)
         
         if len(final_response_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
             final_response_text = final_response_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("...")] + "..."
-        await placeholder.edit_text(final_response_text, parse_mode=ParseMode.HTML)
+        
+        final_message = await placeholder.edit_text(final_response_text, parse_mode=ParseMode.HTML)
+        context.chat_data['last_bot_message_id'] = final_message.message_id
         
         await db_service.add_message_to_db(user.id, "user", user_text)
-        await db_service.add_message_to_db(user.id, "assistant", full_response)
+        await db_service.add_message_to_db(user.id, "assistant", processed_response)
+
+        # --- NEW: Summarization Trigger Logic ---
+        # Increment message counter (counts user + assistant messages, so +2 per turn)
+        count = context.chat_data.get('messages_since_last_summary', 0) + 2
+        context.chat_data['messages_since_last_summary'] = count
+        
+        if count >= config.SUMMARY_THRESHOLD:
+            logger.info(f"Message threshold reached for chat {user.id}. Scheduling summarization.")
+            # Schedule the summarization to run in the background
+            asyncio.create_task(_run_summarization_task(context, user.id))
+        # --- END OF NEW LOGIC ---
 
         if config.LOG_USER_CHAT_MESSAGES:
             user_logger = logging_utils.get_user_logger(user.id, user.username)
-            user_logger.info(f"ASSISTANT: {full_response}")
+            user_logger.info(f"ASSISTANT: {processed_response}")
 
         success = True
 
@@ -149,10 +277,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as edit_e:
                 logger.error(f"Failed to even edit placeholder with error message: {edit_e}")
     finally:
-        monitoring_service.performance_monitor.end_request(
-            request_id=request_id, 
-            success=success
-        )
+        monitoring_service.performance_monitor.end_request(request_id=request_id, success=success)
         
 def register(application: Application):
     """Registers the main chat handler. Should be added last."""

@@ -11,7 +11,7 @@ import time
 import os
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional, Any # Added Any for the Queue type hint
+from typing import Dict, List, Optional, Any
 
 import src.config as config
 
@@ -36,10 +36,8 @@ def init_db():
     """Initializes both the SQLite and Vector (ChromaDB) databases."""
     global db_pool, vector_db_client, embedding_model, memory_collection
 
-    # Ensure database directory exists before connecting
     os.makedirs(config.DB_DIR, exist_ok=True)
 
-    # Initialize SQLite
     try:
         db_pool = _DatabasePool(config.CONVERSATION_DB_FILE)
         with sqlite3.connect(config.CONVERSATION_DB_FILE) as con:
@@ -66,7 +64,6 @@ def init_db():
         logger.critical(f"SQLite database initialization failed: {e}", exc_info=True)
         raise
 
-    # Initialize ChromaDB for Vector Memory
     if not VECTOR_LIBS_INSTALLED:
         logger.warning("ChromaDB or Sentence-Transformers not installed. Vector memory disabled.")
         config.VECTOR_MEMORY_ENABLED = False
@@ -85,9 +82,7 @@ def init_db():
             settings=Settings(anonymized_telemetry=False)
         )
         
-        # --- MODIFICATION START ---
         logger.info("ChromaDB telemetry explicitly disabled via settings.")
-        # --- MODIFICATION END ---
         
         memory_collection = vector_db_client.get_or_create_collection(
             name=config.VECTOR_DB_COLLECTION,
@@ -104,9 +99,8 @@ class _DatabasePool:
     """An asynchronous connection pool for SQLite."""
     def __init__(self, db_path: str, max_connections: int = 10):
         self.db_path = db_path
-        # Use a Queue to manage connections. The type hint for Queue items can be made more specific.
         self._pool: asyncio.Queue[sqlite3.Connection] = asyncio.Queue(maxsize=max_connections)
-        self._semaphore = asyncio.Semaphore(max_connections) # Control concurrent connections
+        self._semaphore = asyncio.Semaphore(max_connections)
 
     async def _create_connection(self) -> sqlite3.Connection:
         conn = await asyncio.to_thread(sqlite3.connect, self.db_path, check_same_thread=False)
@@ -114,16 +108,15 @@ class _DatabasePool:
         return conn
 
     async def get_connection(self) -> sqlite3.Connection:
-        # Acquire a semaphore slot first. This will block if max_connections is reached.
         await self._semaphore.acquire()
         try:
-            if not self._pool.empty(): # Try to get an existing connection from the pool first
+            if not self._pool.empty():
                 return self._pool.get_nowait()
-            else: # If pool is empty, create a new connection if capacity allows
+            else:
                 return await self._create_connection()
-        except asyncio.QueueEmpty: # If get_nowait fails, it means pool is truly empty, create one
+        except asyncio.QueueEmpty:
             return await self._create_connection()
-        except Exception: # Release semaphore if any other error during acquisition/creation
+        except Exception:
             self._semaphore.release()
             raise
 
@@ -131,7 +124,7 @@ class _DatabasePool:
         try:
             await self._pool.put(conn)
         finally:
-            self._semaphore.release() # Always release the semaphore, even if putting back fails (e.g. pool full)
+            self._semaphore.release()
 
 
 @asynccontextmanager
@@ -144,7 +137,6 @@ async def get_db_connection():
     finally:
         await db_pool.return_connection(conn)
 
-# --- NEW FUNCTIONS START ---
 async def get_user_timestamp(user_id: int) -> float:
     """Retrieves the last message timestamp for a given user."""
     async with get_db_connection() as con:
@@ -161,35 +153,62 @@ async def update_user_timestamp(user_id: int, timestamp: float):
             (user_id, timestamp)
         )
         await asyncio.to_thread(con.commit)
-# --- NEW FUNCTIONS END ---
 
 # --- Core Database Functions ---
 async def add_message_to_db(chat_id: int, role: str, content: str):
     """Adds a message to SQLite and its vector embedding to ChromaDB."""
     db_id = None
-    async with get_db_connection() as con: #
-        cursor = await asyncio.to_thread( #
+    async with get_db_connection() as con:
+        cursor = await asyncio.to_thread(
             con.execute, "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)", (chat_id, role, content)
         )
-        db_id = cursor.lastrowid #
-        await asyncio.to_thread(con.commit) #
+        db_id = cursor.lastrowid
+        await asyncio.to_thread(con.commit)
 
-    # --- MODIFICATION START ---
-    # The condition "role == 'user'" has been removed to allow both user and assistant
-    # messages to be added to the long-term vector memory.
     if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model:
-    # --- MODIFICATION END ---
         try:
-            embedding = await asyncio.to_thread(embedding_model.encode, [content]) #
-            await asyncio.to_thread( #
+            embedding = await asyncio.to_thread(embedding_model.encode, [content])
+            await asyncio.to_thread(
                 memory_collection.add,
                 embeddings=[embedding[0].tolist()],
                 documents=[content],
                 metadatas=[{"chat_id": chat_id, "timestamp": time.time()}],
                 ids=[str(db_id)]
             )
-        except Exception as e: #
-            logger.error(f"Failed to add vector embedding for chat {chat_id} (SQLite ID: {db_id}): {e}", exc_info=True) #
+        except Exception as e:
+            logger.error(f"Failed to add vector embedding for chat {chat_id} (SQLite ID: {db_id}): {e}", exc_info=True)
+
+# --- NEW: Function to add a summary to the database ---
+async def add_summary_to_db(chat_id: int, summary_text: str):
+    """
+    Adds a conversation summary to the SQLite and vector databases.
+    The summary is stored with the 'system' role to distinguish it.
+    """
+    db_id = None
+    # The "Memory Summary:" prefix helps identify these entries in the raw DB
+    content_with_prefix = f"Memory Summary: {summary_text}"
+
+    async with get_db_connection() as con:
+        cursor = await asyncio.to_thread(
+            con.execute, "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)", (chat_id, "system", content_with_prefix)
+        )
+        db_id = cursor.lastrowid
+        await asyncio.to_thread(con.commit)
+
+    # Add the raw summary text to the vector DB for semantic searching
+    if config.VECTOR_MEMORY_ENABLED and db_id and embedding_model:
+        try:
+            embedding = await asyncio.to_thread(embedding_model.encode, [summary_text])
+            await asyncio.to_thread(
+                memory_collection.add,
+                embeddings=[embedding[0].tolist()],
+                documents=[summary_text], # We store the raw summary for searching
+                metadatas=[{"chat_id": chat_id, "timestamp": time.time(), "type": "summary"}], # Add type metadata
+                ids=[str(db_id)]
+            )
+            logger.info(f"Successfully added a new summary to vector memory for chat {chat_id}.")
+        except Exception as e:
+            logger.error(f"Failed to add summary vector embedding for chat {chat_id}: {e}", exc_info=True)
 
 
 async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, str]]:
@@ -205,7 +224,7 @@ async def get_history_from_db(chat_id: int, limit: int = 50) -> List[Dict[str, s
 async def search_semantic_memory(chat_id: int, query_text: str) -> List[str]:
     """Performs a semantic search in ChromaDB for relevant memories."""
     if not config.VECTOR_MEMORY_ENABLED or not memory_collection or not embedding_model:
-        if config.VECTOR_MEMORY_ENABLED: # Log only if it was supposed to be enabled
+        if config.VECTOR_MEMORY_ENABLED:
             logger.debug("Vector memory is enabled in config, but ChromaDB/embedding model is not initialized.")
         return []
     try:
@@ -227,7 +246,7 @@ async def delete_last_interaction(chat_id: int):
     async with get_db_connection() as con:
         cursor = await asyncio.to_thread(con.execute, "SELECT id FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 2", (chat_id,))
         rows = await asyncio.to_thread(cursor.fetchall)
-        if not rows: return # No interactions to delete
+        if not rows: return
         ids_to_delete = [row[0] for row in rows]
         placeholders = ','.join('?' for _ in ids_to_delete)
         await asyncio.to_thread(con.execute, f"DELETE FROM conversations WHERE id IN ({placeholders})", ids_to_delete)
@@ -243,10 +262,7 @@ async def delete_last_interaction(chat_id: int):
 async def clear_history(chat_id: int):
     """Deletes all data for a user from the databases."""
     async with get_db_connection() as con:
-        # --- MODIFICATION START ---
-        # Also clear the rate limit timestamp when history is cleared
         await asyncio.to_thread(con.execute, "DELETE FROM user_rate_limits WHERE user_id = ?", (chat_id,))
-        # --- MODIFICATION END ---
         await asyncio.to_thread(con.execute, "DELETE FROM conversations WHERE chat_id = ?", (chat_id,))
         await asyncio.to_thread(con.commit)
 

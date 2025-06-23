@@ -37,7 +37,8 @@ VECTOR_MEMORY_ENABLED = os.getenv("VECTOR_MEMORY_ENABLED", "1") == "1"
 # --- AI Model & API Configuration ---
 LM_STUDIO_API_BASE: Optional[str] = os.getenv("LM_STUDIO_API_BASE")
 AI_TIMEOUT = 300.0
-MAX_RESPONSE_TOKENS = 2048
+MAX_RESPONSE_TOKENS = 1024
+MAX_PROMPT_TOKENS = 3072
 AI_PARAMS = {
     "chat": {"model": os.getenv("LM_STUDIO_CHAT_MODEL", "lm-studio-chat-default"), "temperature": 0.7},
     "creative": {"model": os.getenv("LM_STUDIO_CREATIVE_MODEL", "lm-studio-creative-default"), "temperature": 1.1},
@@ -48,6 +49,8 @@ AI_PARAMS = {
 STREAM_UPDATE_INTERVAL = 1.5
 USER_RATE_LIMIT = 1.0
 PERFORMANCE_REPORTING_ENABLED = os.getenv("PERFORMANCE_REPORTING_ENABLED", "0") == "1"
+SUMMARY_THRESHOLD = 10
+
 # --- User chat logging ---
 LOG_USER_CHAT_MESSAGES = os.getenv("LOG_USER_CHAT_MESSAGES", "0") == "1"
 LOG_USER_COMMANDS = os.getenv("LOG_USER_COMMANDS", "0") == "1"
@@ -57,38 +60,41 @@ LOG_USER_UI_INTERACTIONS = os.getenv("LOG_USER_UI_INTERACTIONS", "0") == "1"
 # --- Debugging Configuration ---
 DEBUG_LOGGING = os.getenv("DEBUG_LOGGING", "0") == "1"
 
-# --- Conversation Handler States ---
+# --- Conversation Handler States (FIXED) ---
 (
     # === Main Conversation Flow ===
     START_SETUP_NAME,         # 0
     ASK_PROFILE,              # 1
-    ASK_NSFW_ONBOARDING,      # 2
-    SETUP_HUB,                # 3
+    ASK_GENDER,               # 2 (Restored)
+    ASK_ROLE,                 # 3 (Restored)
+    ASK_NSFW_ONBOARDING,      # 4
+    SETUP_HUB,                # 5
 
     # === Profile Editing Flow ===
-    PROFILE_HUB,              # 4
-    EDIT_NAME_PROMPT,         # 5
-    EDIT_PROFILE_PROMPT,      # 6
+    PROFILE_HUB,              # 6
+    EDIT_NAME_PROMPT,         # 7
+    EDIT_PROFILE_PROMPT,      # 8
+    EDIT_EXTRAS_MENU,         # 9 (Restored)
 
     # === Persona Management Flow ===
-    PERSONA_MENU,             # 7
-    CUSTOM_PERSONA_NAME,      # 8
-    CUSTOM_PERSONA_PROMPT,    # 9
+    PERSONA_MENU,             # 10
+    CUSTOM_PERSONA_NAME,      # 11
+    CUSTOM_PERSONA_PROMPT,    # 12
     
     # === Scenery Management Flow ===
-    SCENERY_MENU,             # 10
-    SCENE_GENRE_SELECT,       # 11
+    SCENERY_MENU,             # 13
+    SCENE_GENRE_SELECT,       # 14
 
     # === Data Management Flow ===
-    DELETE_MENU,              # 12
-    DELETE_CUSTOM_PERSONA_SELECT, # 13
+    DELETE_MENU,              # 15
+    DELETE_CUSTOM_PERSONA_SELECT, # 16
 
     # === Nested NSFW Persona Generation States ===
-    NSFW_GEN_START,           # 14
-    NSFW_GEN_SPECIES,         # 15
-    NSFW_GEN_GENDER,          # 16
-    NSFW_GEN_ROLE,            # 17
-    NSFW_GEN_FETISHES,        # 18
-    NSFW_GEN_CONFIRM,         # 19
+    NSFW_GEN_START,           # 17
+    NSFW_GEN_SPECIES,         # 18
+    NSFW_GEN_GENDER,          # 19
+    NSFW_GEN_ROLE,            # 20
+    NSFW_GEN_FETISHES,        # 21
+    NSFW_GEN_CONFIRM,         # 22
 
-) = range(20)
+) = range(23) # (Updated count)

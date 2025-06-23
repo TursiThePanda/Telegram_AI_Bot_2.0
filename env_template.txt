@@ -1,13 +1,13 @@
 # .env
 
 # --- Core Bot Credentials (Required) ---
-
+#@tursi_test_rp_bot
 TELEGRAM_BOT_TOKEN=
 BOT_OWNER_ID=
 TELEGRAM_BOT_USERNAME=
 
 # --- AI Model Server Configuration (Required) ---
-LM_STUDIO_API_BASE=http://localhost:1234
+LM_STUDIO_API_BASE=http://localhost:4443
 
 # --- AI Model Specification ---
 # You can use the same model for each one.
@@ -15,6 +15,7 @@ LM_STUDIO_API_BASE=http://localhost:1234
 # They just need to be loaded at the same tim in the LM Studio
 LM_STUDIO_CHAT_MODEL=
 LM_STUDIO_CREATIVE_MODEL=
+LM_STUDIO_UTILITY_MODEL=
 
 # --- Feature Toggles ---
 # Set to "1" to enable, "0" to disable.
