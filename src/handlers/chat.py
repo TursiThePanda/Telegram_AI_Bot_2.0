@@ -39,38 +39,36 @@ def count_message_tokens(messages: list[dict], model: str = "gpt-3.5-turbo") -> 
     num_tokens += 2
     return num_tokens
 
+# --- MODIFIED: The prompt construction is now completely restructured for clarity ---
 async def build_chat_context(context: ContextTypes.DEFAULT_TYPE, user_text: str) -> list:
     """
     Constructs the message list for the AI, ensuring it fits within the token limit.
     """
     chat_id = context.chat_data.get('chat_id', context.user_data.get('user_id'))
     
-    persona_prompt = context.chat_data.get('persona_prompt', "You are a helpful AI assistant.")
+    # --- Character & Persona Data ---
+    ai_persona_prompt = context.chat_data.get('persona_prompt', "You are a helpful AI assistant.")
     user_name = context.user_data.get('user_display_name', 'user')
     user_profile = context.user_data.get('user_profile', 'not specified')
-    
-    base_system_rules = (
-        "You are an engaging and descriptive role-playing companion and a master storyteller. "
-        "When it is your turn, you will describe the scene, the actions of non-player characters, and any dialogue they speak. "
-        "You MUST complete your narrative beat for your turn before ending. "
-        "Do not describe the user's character's response or assume their actions, thoughts, or feelings. "
-        f"You must always explicitly ask the user 'What does {user_name} do?' or 'How does {user_name} respond?' at the end of your turn, or a similar direct question prompting their next action. "
-        "Wait for the user's input before continuing the narrative.\n\n"
-        
-        "--- CRITICAL BEHAVIORAL RULES ---\n"
-        "1.  **Advance the Plot:** Your primary goal is to advance the story. In every response, you MUST introduce a new action, a new event, or a significant change in the scene. Do not get stuck in repetitive loops describing the same state. If the user's input is passive, you must take the initiative to move the plot forward.\n"
-        "2.  **Use Original Language:** Always describe events and dialogue using your own creative language. DO NOT repeat the user's phrases or sentences back to them. Reinterpret their requests and describe the outcome with original descriptions."
-    )
+
+    # --- New, Unambiguous Prompt Structure ---
     system_prompt = (
-        f"{persona_prompt}\n\n"
-        f"{base_system_rules}\n\n"
-        f"Context for the AI:\n"
-        f"The user's character name is: {user_name}\n"
-        f"The user's character profile: {user_profile}"
+        "This is a role-playing chat. You will act as your designated character and I, the user, will act as mine. You must follow all rules strictly.\n\n"
+        "--- YOUR CHARACTER DOSSIER ---\n"
+        f"{ai_persona_prompt}\n\n"
+        "--- THE USER'S CHARACTER DOSSIER ---\n"
+        f"Name: {user_name}\n"
+        f"Profile: {user_profile}\n\n"
+        "--- CRITICAL BEHAVIORAL RULES ---\n"
+        "1.  **Control Your Character ONLY:** You are to ONLY speak for, describe the actions of, and express the thoughts of YOUR CHARACTER. You are strictly forbidden from describing the user's character's actions, feelings, or dialogue.\n"
+        "2.  **Advance the Plot:** Your primary goal is to advance the story. In every response, you MUST introduce a new action, a new event, or a significant change in the scene. Do not get stuck in repetitive loops describing the same state. If the user's input is passive, you must take the initiative to move the plot forward.\n"
+        "3.  **Use Original Language:** Always describe events and dialogue using your own creative language. DO NOT repeat the user's phrases or sentences back to them. Reinterpret their requests and describe the outcome with original descriptions.\n"
+        f"4.  **End Your Turn Correctly:** You must always end your turn by prompting the user for their action (e.g., 'What does {user_name} do?')."
     )
     
     messages = [{"role": "system", "content": system_prompt}]
 
+    # --- Memory and History Logic (remains the same) ---
     if config.VECTOR_MEMORY_ENABLED:
         relevant_memories = await db_service.search_semantic_memory(chat_id, user_text)
         if relevant_memories:
@@ -78,8 +76,6 @@ async def build_chat_context(context: ContextTypes.DEFAULT_TYPE, user_text: str)
             messages.append({"role": "system", "content": memory_prompt})
 
     current_tokens = count_message_tokens(messages)
-    # The get_history function now returns IDs, but we don't need them here.
-    # We only need the content for the short-term context window.
     history_with_ids = await db_service.get_history_from_db(chat_id, limit=50)
     history_for_context = [{"role": msg["role"], "content": msg["content"]} for msg in history_with_ids]
     
@@ -102,7 +98,6 @@ def sanitize_html(text):
     """Escapes HTML special characters to prevent formatting errors."""
     return html.escape(text, quote=False)
 
-# --- MODIFIED: This task now handles memory pruning ---
 async def _run_summarization_task(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """
     A background task that generates a summary and prunes the original messages.
@@ -116,26 +111,19 @@ async def _run_summarization_task(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     try:
         context.chat_data['is_summarizing'] = True
         
-        # Fetch the last N messages with their IDs to be summarized
         messages_to_summarize_with_ids = await db_service.get_history_from_db(chat_id, limit=config.SUMMARY_THRESHOLD)
 
         if len(messages_to_summarize_with_ids) < config.SUMMARY_THRESHOLD:
             logger.info(f"Not enough history to summarize for chat {chat_id}. Need {config.SUMMARY_THRESHOLD}, have {len(messages_to_summarize_with_ids)}.")
             return
             
-        # Create a clean list of messages for the AI (without IDs)
         messages_for_ai = [{"role": msg["role"], "content": msg["content"]} for msg in messages_to_summarize_with_ids]
         summary = await ai_service.get_summary(messages_for_ai)
         
         if summary:
-            # Add the new summary to the database
-            await db_service.add_summary_to_db(chat_id, summary)
-
-            # Now that the summary is stored, prune the original messages
             ids_to_prune = [msg['id'] for msg in messages_to_summarize_with_ids]
+            await db_service.add_summary_to_db(chat_id, summary)
             await db_service.delete_messages_by_ids(ids_to_prune)
-            
-            # Reset the counter after a successful summary and pruning
             context.chat_data['messages_since_last_summary'] = 0
         else:
             logger.warning(f"AI returned an empty summary for chat {chat_id}.")
@@ -143,7 +131,6 @@ async def _run_summarization_task(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     except Exception as e:
         logger.error(f"Error during background summarization for chat {chat_id}: {e}", exc_info=True)
     finally:
-        # Always release the lock
         context.chat_data['is_summarizing'] = False
 
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220,38 +207,8 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning("Final generated response was empty. Sending an error message to the user.")
             await placeholder.edit_text("😕 The AI model returned an empty response. Please try rephrasing your message or try again later.")
             return
-
-        processed_response = full_response_raw
         
-        expected_prompt_end = f"What does {user_name} do?"
-        alt_prompt_end = f"How does {user_name} respond?"
-
-        assumed_action_patterns = [
-            re.compile(r"As \w+ complied", re.IGNORECASE), re.compile(r"Tursi complied", re.IGNORECASE),
-            re.compile(r"Tursi obeyed", re.IGNORECASE), re.compile(r"He complied", re.IGNORECASE),
-            re.compile(r"She obeyed", re.IGNORECASE),
-            re.compile(r"(\bhe|\bshe|\bthey|\bTursi) (began to|started to|proceeded to|moved to|reached out to)", re.IGNORECASE),
-        ]
-        
-        explicit_question_found = False
-        if expected_prompt_end in processed_response:
-            processed_response = processed_response.split(expected_prompt_end, 1)[0] + expected_prompt_end
-            explicit_question_found = True
-        elif alt_prompt_end in processed_response:
-            processed_response = processed_response.split(alt_prompt_end, 1)[0] + alt_prompt_end
-            explicit_question_found = True
-        
-        if not explicit_question_found:
-            cutoff_index = len(processed_response)
-            for pattern in assumed_action_patterns:
-                match = pattern.search(processed_response)
-                if match and match.start() < cutoff_index:
-                    cutoff_index = match.start()
-            processed_response = processed_response[:cutoff_index].strip()
-            if not processed_response.strip().endswith(('?', '!', '.')):
-                 processed_response += f" What does {user_name} do?"
-
-        final_response_text = sanitize_html(processed_response)
+        final_response_text = sanitize_html(full_response_raw)
         
         if len(final_response_text) > TELEGRAM_MAX_MESSAGE_LENGTH:
             final_response_text = final_response_text[:TELEGRAM_MAX_MESSAGE_LENGTH - len("...")] + "..."
@@ -260,7 +217,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.chat_data['last_bot_message_id'] = final_message.message_id
         
         await db_service.add_message_to_db(user.id, "user", user_text)
-        await db_service.add_message_to_db(user.id, "assistant", processed_response)
+        await db_service.add_message_to_db(user.id, "assistant", full_response_raw)
 
         count = context.chat_data.get('messages_since_last_summary', 0) + 2
         context.chat_data['messages_since_last_summary'] = count
@@ -271,7 +228,7 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if config.LOG_USER_CHAT_MESSAGES:
             user_logger = logging_utils.get_user_logger(user.id, user.username)
-            user_logger.info(f"ASSISTANT: {processed_response}")
+            user_logger.info(f"ASSISTANT: {full_response_raw}")
 
         success = True
 
