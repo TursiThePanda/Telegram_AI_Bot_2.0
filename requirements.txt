@@ -12,6 +12,7 @@ httpx
 chromadb
 sentence-transformers
 aiosqlite
+tiktoken
 
 # System & Performance Monitoring
 psutil
