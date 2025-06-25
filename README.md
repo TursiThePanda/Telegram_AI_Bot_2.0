@@ -1,6 +1,6 @@
-# Telegram AI Role-Playing Bot 2.0
+# not so Telegram AI Role-Playing Bot 2.0
 
-Welcome to the home of a sophisticated, feature-rich AI companion designed for immersive and persistent role-playing experiences on Telegram. This bot connects to a local Large Language Model (LLM) running on LM Studio, ensuring privacy and high-performance, customizable interactions.
+Welcome to the branch of a sophisticated, feature-rich AI companion designed for immersive and persistent role-playing experiences not only on Telegram. This bot connects to a local Large Language Model (LLM) running on LM Studio, ensuring privacy and high-performance, customizable interactions. For even better privacy and feeling of the past, you get the command line access to this solution withou the telegram too.
 
 ## Key Features
 
