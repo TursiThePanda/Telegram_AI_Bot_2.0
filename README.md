@@ -1,6 +1,6 @@
 # not so Telegram AI Role-Playing Bot 2.0
 
-Welcome to the branch of a sophisticated, feature-rich AI companion designed for immersive and persistent role-playing experiences not only on Telegram. This bot connects to a local Large Language Model (LLM) running on LM Studio, ensuring privacy and high-performance, customizable interactions. For even better privacy and feeling of the past, you get the command line access to this solution withou the telegram too.
+Welcome to the branch of a sophisticated, feature-rich AI companion designed for immersive and persistent role-playing experiences not only on Telegram. This bot connects to a local Large Language Model (LLM) running on LM Studio, ensuring privacy and high-performance, customizable interactions. For even better privacy and feeling of the past, you get the command line access to this solution without the telegram too.
 
 ## Key Features
 
@@ -37,6 +37,46 @@ This bot includes optional **NSFW (Not Safe For Work) capabilities**, designed w
 The entire NSFW feature set is built as a self-contained "plug-in". If you wish to guarantee a 100% SFW environment on your instance of the bot, you can **completely remove all NSFW functionality** simply by deleting the **`nsfw.py`** file from the `src/handlers/` directory. The bot will detect that the file is missing and will not display any NSFW-related options.
 
 ---
+
+## Installation & Setup without Telegram
+
+1.  **Clone the Repository**
+    ```bash
+    git clone [https://github.com/TursiThePanda/Telegram_AI_Bot_2.0.git](https://github.com/TursiThePanda/Telegram_AI_Bot_2.0.git)
+    cd Telegram_AI_Bot_2.0
+    ```
+	you have to select this "telegram-optional" branch somewhere
+
+2.  **Install Dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **Configure Your Environment**
+    * Rename the `.env.example` file (if provided) to `.env` or create a new `.env` file in the project's root directory.
+    * Fill in the required values:
+        ```env
+        # --- AI Model Server Configuration (Required) ---
+        LM_STUDIO_API_BASE=http://localhost:1234/v1
+
+        # --- AI Model Naming (Required) ---
+        # The bot no longer auto-detects models. You must specify the model file name.
+        LM_STUDIO_CHAT_MODEL=repository/your-model-name-gguf
+        LM_STUDIO_CREATIVE_MODEL=repository/your-model-name-gguf
+
+        # --- Feature Toggles (Optional) ---
+        VECTOR_MEMORY_ENABLED=1
+        DEBUG_LOGGING=0
+        PERFORMANCE_REPORTING_ENABLED=1 # Set to 1 to enable, 0 to disable
+        USER_LOGGING_ENABLED=1      # Set to 1 to enable, 0 to disable
+        ```
+
+4.  **Run the Bot**
+    * Ensure your LM Studio server is running with the specified model loaded.
+    * Start the bot:
+        ```bash
+        python cli_main.py
+        ```
 
 ## Installation & Setup
 
